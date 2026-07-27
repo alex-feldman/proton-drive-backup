@@ -131,6 +131,26 @@ You only need to do this once per machine per Proton account. The CLI caches
 your session in your OS's secure credential store, so you won't be asked to
 log in again until that session eventually expires.
 
+### If your AI agent is running `setup` for you
+
+`setup` is genuinely interactive (an account-yes/no question, optional vault
+and folder overrides, then a real browser login) — not something a coding
+agent can just run as one ordinary foreground command. If your agent's tool
+calls don't share a persistent shell/TTY across calls (true of most AI
+coding assistants, including Claude Code), a plain foreground run will look
+like it "hangs" and then silently dies at the first prompt: don't try to
+patch that with a named pipe (`mkfifo`) — that's unreliable in the same way
+across separate tool-call boundaries, especially on Windows.
+
+What works reliably: have the agent ask you up front for anything it can
+know in advance (do you have an account yet, any non-default vault/folder
+path), pipe all of those answers into `setup` at once
+(`printf 'y\n\n\n' | node backup.js setup`), and run that in the background
+with output going to a log file it can poll — not a single foreground call
+with a short timeout, since the one-time CLI download can take a while. Once
+`setup` reaches the browser-login step it doesn't need any more stdin, so
+this pre-answer-then-background approach gets all the way through cleanly.
+
 ## Usage
 
 ```bash
