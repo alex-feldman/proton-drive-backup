@@ -10,13 +10,13 @@ If someone handed you this repo's URL, paste this into your AI coding
 assistant (Claude, ChatGPT, etc.) to get set up:
 
 > Clone the repo at https://github.com/alex-feldman/proton-drive-backup and
-> install it. It needs Node.js and the official Proton Drive CLI
-> (https://proton.me/support/drive-cli) — check for both and tell me if
-> either is missing, with instructions to get them. Then run
-> `node backup.js setup` and walk me through it: it will ask if I have a
-> Proton account already, and if not it will wait for me to create one at
-> proton.me before continuing. It will also ask where I want my local vault
-> folder and which remote folder to use — the defaults are fine unless I say
+> install it. It needs Node.js — check for that and tell me if it's missing,
+> with instructions to get it. Then run `node backup.js setup` and walk me
+> through it: it will ask if I have a Proton account already, and if not it
+> will wait for me to create one at proton.me before continuing. It
+> downloads and installs the Proton Drive CLI itself, so you shouldn't need
+> to do that manually. It will also ask where I want my local vault folder
+> and which remote folder to use — the defaults are fine unless I say
 > otherwise. It finishes with a browser login; tell me when to switch to my
 > browser and when to come back.
 
@@ -81,13 +81,9 @@ otherwise you'd be syncing the same files through two services at once.
   [proton.me/support/account/manage-account/storage](https://proton.me/support/account/manage-account/storage)).
   If you don't have one yet, that's fine — `node backup.js setup` asks and
   will wait for you to go create one before continuing.
-- [Node.js](https://nodejs.org/) 18 or newer
-- The official [Proton Drive CLI](https://proton.me/support/drive-cli)
-  (`proton-drive`), installed and on your `PATH`. Grab a prebuilt binary from
-  the [ProtonDriveApps/sdk](https://github.com/ProtonDriveApps/sdk) releases,
-  or build it yourself with [Bun](https://bun.sh/) per that repo's `cli/README.md`.
-  If you skip this, `setup` tells you exactly where to get it and stops there
-  — safe to run before you've installed anything.
+- [Node.js](https://nodejs.org/) 18 or newer. Nothing else to install by
+  hand — `setup` downloads and installs the official
+  [Proton Drive CLI](https://proton.me/support/drive-cli) itself.
 
 ## Setup
 
@@ -102,8 +98,12 @@ node backup.js setup
 1. Ask whether you already have a Proton account. If not, it prints the
    signup link and **waits** — type `done` once you've created one, and it
    continues from there. No account, no login, so this has to come first.
-2. Check that the `proton-drive` binary is on your `PATH` (and tell you where
-   to get it if it isn't).
+2. Check for the `proton-drive` binary and, if it's missing, download and
+   install it automatically into this folder's `bin/` (Windows/macOS/Linux,
+   x64/arm64 — no admin/sudo needed, nothing added to your system `PATH`).
+   If your platform isn't one of those (e.g. Linux musl/Alpine), or the
+   download fails, it tells you exactly where to get the binary yourself and
+   how to point this tool at it (`PROTON_DRIVE_BIN`).
 3. Ask where you want your local vault folder (default
    `~/Documents/proton-vault`) and create it.
 4. Ask which remote Proton Drive folder to sync it to (default
@@ -171,10 +171,15 @@ touch, share, or depend on anyone else's data, bucket, or account.
 - `sync` re-uploads the whole vault folder each time via the CLI's own
   recursive upload, rather than diffing file-by-file — simple and robust, at
   the cost of some redundant transfer on a large, mostly-unchanged vault.
+- Automatic CLI install only covers Windows/macOS/Linux on x64/arm64 glibc.
+  Linux musl (e.g. Alpine) and anything else isn't auto-installed — `setup`
+  will tell you and point at manual install instructions instead.
 - The official Proton Drive CLI is new (shipped June 2026) and its exact
-  command syntax may shift. If a command in `backup.js` stops matching what
-  `proton-drive --help` shows, that's why — please open an issue or send a
-  fix.
+  command syntax may shift between versions. The commands in `backup.js` are
+  verified against CLI `0.6.0`; if a command starts failing with something
+  that looks like a usage error rather than an auth error, check
+  `proton-drive --help` — the syntax may have moved on since this was
+  written. Please open an issue or send a fix.
 
 ## License
 

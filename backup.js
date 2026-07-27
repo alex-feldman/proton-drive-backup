@@ -8,17 +8,20 @@
  *
  * The `proton-drive` CLI shipped June 2026 and its exact subcommand syntax
  * may drift. If a command below stops matching `proton-drive --help`,
- * update the PROTON_BIN invocations to match.
+ * update the runProton() invocations to match.
  */
 
 const { spawnSync } = require('child_process');
+const https = require('https');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
-const PROTON_BIN = process.env.PROTON_DRIVE_BIN || 'proton-drive';
 const CONFIG_PATH = path.join(__dirname, 'config.json');
+const LOCAL_BIN_DIR = path.join(__dirname, 'bin');
+// Last known-good version, used only if live version discovery fails.
+const FALLBACK_CLI_VERSION = '0.6.0';
 
 function loadConfig() {
   if (fs.existsSync(CONFIG_PATH)) {
@@ -52,6 +55,14 @@ function vaultPath() {
 function remoteFolder() {
   const config = loadConfig();
   return process.env.PROTON_BACKUP_FOLDER || config.remoteFolder || defaultRemoteFolder();
+}
+
+/** Resolution order: explicit env override > a binary this tool installed itself > PATH. */
+function protonBinPath() {
+  if (process.env.PROTON_DRIVE_BIN) return process.env.PROTON_DRIVE_BIN;
+  const config = loadConfig();
+  if (config.protonBinPath && fs.existsSync(config.protonBinPath)) return config.protonBinPath;
+  return 'proton-drive';
 }
 
 // Manual line-queue readline, not repeated rl.question() calls: with piped
@@ -93,8 +104,8 @@ function ask(question) {
   });
 }
 
-function binaryExists() {
-  const result = spawnSync(PROTON_BIN, ['--version'], { stdio: 'pipe', encoding: 'utf8' });
+function binaryExists(bin) {
+  const result = spawnSync(bin, ['--version'], { stdio: 'pipe', encoding: 'utf8' });
   return result.status === 0;
 }
 
@@ -105,7 +116,7 @@ function binaryExists() {
  * CLI errors for an expired/missing session — not a documented contract.
  */
 function runProton(args, opts = {}) {
-  const result = spawnSync(PROTON_BIN, args, {
+  const result = spawnSync(protonBinPath(), args, {
     stdio: opts.inherit ? 'inherit' : 'pipe',
     encoding: 'utf8',
   });
@@ -123,14 +134,104 @@ function printAuthHelp() {
   console.error('Then try your command again.\n');
 }
 
-function ensureBinary() {
-  if (!binaryExists()) {
-    console.error(`Could not find "${PROTON_BIN}" on your PATH.`);
-    console.error('Install the official Proton Drive CLI first:');
-    console.error('  https://proton.me/support/drive-cli');
-    console.error('  https://github.com/ProtonDriveApps/sdk (cli/ subpackage, prebuilt binaries or build with Bun)');
-    process.exit(1);
+/** win32/darwin/linux + x64/arm64 -> Proton's download-page naming, or null if unsupported. */
+function detectPlatformKey() {
+  const arch = process.arch;
+  if (arch !== 'x64' && arch !== 'arm64') return null;
+  if (process.platform === 'win32') return { os: 'windows', arch, ext: '.exe' };
+  if (process.platform === 'darwin') return { os: 'darwin', arch, ext: '' };
+  if (process.platform === 'linux') return { os: 'linux', arch, ext: '' };
+  return null;
+}
+
+function httpGetFollow(url, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
+        res.resume();
+        httpGetFollow(new URL(res.headers.location, url).toString(), redirectsLeft - 1).then(resolve, reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+        return;
+      }
+      resolve(res);
+    }).on('error', reject);
+  });
+}
+
+async function discoverCliVersion() {
+  try {
+    const res = await httpGetFollow('https://proton.me/download/drive/cli/index.html');
+    let body = '';
+    for await (const chunk of res) body += chunk;
+    const match = body.match(/\/download\/drive\/cli\/(\d+\.\d+\.\d+)\//);
+    return match ? match[1] : FALLBACK_CLI_VERSION;
+  } catch (err) {
+    return FALLBACK_CLI_VERSION;
   }
+}
+
+async function downloadFile(url, destPath) {
+  const res = await httpGetFollow(url);
+  await new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    res.pipe(file);
+    file.on('finish', () => file.close(resolve));
+    file.on('error', reject);
+    res.on('error', reject);
+  });
+}
+
+/** Best-effort automatic install into ./bin. Returns true on success. */
+async function tryAutoInstall() {
+  const plat = detectPlatformKey();
+  if (!plat) {
+    console.error(`Automatic install is not supported on this platform/architecture (${process.platform}/${process.arch}).`);
+    return false;
+  }
+
+  try {
+    const version = await discoverCliVersion();
+    const url = `https://proton.me/download/drive/cli/${version}/${plat.os}-${plat.arch}/proton-drive${plat.ext}`;
+    fs.mkdirSync(LOCAL_BIN_DIR, { recursive: true });
+    const dest = path.join(LOCAL_BIN_DIR, `proton-drive${plat.ext}`);
+
+    console.log(`Downloading Proton Drive CLI ${version} for ${plat.os}-${plat.arch} (roughly 100+ MB, may take a minute)...`);
+    await downloadFile(url, dest);
+    if (plat.ext !== '.exe') fs.chmodSync(dest, 0o755);
+
+    if (!binaryExists(dest)) {
+      console.error('Downloaded binary did not run correctly.');
+      return false;
+    }
+
+    const config = loadConfig();
+    config.protonBinPath = dest;
+    saveConfig(config);
+    console.log(`Installed Proton Drive CLI to ${dest}`);
+    return true;
+  } catch (err) {
+    console.error(`Automatic install failed: ${err.message}`);
+    return false;
+  }
+}
+
+async function ensureBinary() {
+  if (binaryExists(protonBinPath())) return;
+
+  console.log('Proton Drive CLI not found — attempting automatic install...');
+  const installed = await tryAutoInstall();
+  if (installed) return;
+
+  console.error('\nCould not install the Proton Drive CLI automatically.');
+  console.error('Install it yourself, then re-run this command:');
+  console.error('  https://proton.me/support/drive-cli');
+  console.error('  https://proton.me/download/drive/cli/index.html');
+  console.error('(Or set PROTON_DRIVE_BIN to the full path of an existing "proton-drive" binary.)');
+  process.exit(1);
 }
 
 function ensureVault(dir) {
@@ -161,7 +262,7 @@ async function ensureProtonAccount() {
 
 async function cmdSetup() {
   await ensureProtonAccount();
-  ensureBinary();
+  await ensureBinary();
 
   const config = loadConfig();
 
@@ -205,8 +306,8 @@ async function cmdSetup() {
   console.log('\nSetup complete. You should not need to log in again until your session eventually expires.');
 }
 
-function cmdCheck() {
-  ensureBinary();
+async function cmdCheck() {
+  await ensureBinary();
   const folder = remoteFolder();
   const result = runProton(['filesystem', 'list', folder, '--json']);
   if (result.ok) {
@@ -244,8 +345,8 @@ function cmdMove(filePath, opts = {}) {
   console.log('Run "node backup.js sync" when you are ready to upload the vault.');
 }
 
-function cmdSync() {
-  ensureBinary();
+async function cmdSync() {
+  await ensureBinary();
   const vault = vaultPath();
   ensureVault(vault);
   const folder = remoteFolder();
@@ -270,13 +371,13 @@ function cmdSync() {
   console.log('Note: sync only uploads. Removing a file from the vault does not delete it remotely.');
 }
 
-function cmdAdd(filePath) {
+async function cmdAdd(filePath) {
   cmdMove(filePath, { copy: false });
-  cmdSync();
+  await cmdSync();
 }
 
-function cmdList() {
-  ensureBinary();
+async function cmdList() {
+  await ensureBinary();
   const folder = remoteFolder();
   const result = runProton(['filesystem', 'list', folder, '--json']);
   if (!result.ok) {
@@ -290,12 +391,12 @@ function cmdList() {
   console.log(result.stdout.trim() || '(empty)');
 }
 
-function cmdGet(name, destDir) {
+async function cmdGet(name, destDir) {
   if (!name) {
     console.error('Usage: node backup.js get <remote-file-name> [local-dest-dir]');
     process.exit(1);
   }
-  ensureBinary();
+  await ensureBinary();
   const folder = remoteFolder();
   const dest = destDir || '.';
   const remotePath = `${folder}/${name}`;
@@ -316,10 +417,12 @@ function printHelp() {
 
 A local "vault" folder (default ~/Documents/proton-vault) mirrors to a
 dedicated Proton Drive folder. Organize the vault with this CLI or your
-OS file browser, then sync.
+OS file browser, then sync. "setup" installs the official Proton Drive CLI
+automatically on Windows/macOS/Linux (x64/arm64) if it is not already on
+your PATH.
 
 Usage:
-  node backup.js setup              One-time: vault + remote folder + login
+  node backup.js setup              One-time: CLI install + vault + login
   node backup.js check              Verify your session is still valid
   node backup.js move <file> [--copy]  Move (or copy) a file into the vault
   node backup.js sync               Upload the whole vault to Proton Drive
@@ -337,22 +440,22 @@ async function main() {
       await cmdSetup();
       break;
     case 'check':
-      cmdCheck();
+      await cmdCheck();
       break;
     case 'move':
       cmdMove(rest.find((a) => a !== '--copy'), { copy: rest.includes('--copy') });
       break;
     case 'sync':
-      cmdSync();
+      await cmdSync();
       break;
     case 'add':
-      cmdAdd(rest[0]);
+      await cmdAdd(rest[0]);
       break;
     case 'list':
-      cmdList();
+      await cmdList();
       break;
     case 'get':
-      cmdGet(rest[0], rest[1]);
+      await cmdGet(rest[0], rest[1]);
       break;
     default:
       printHelp();
