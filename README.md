@@ -47,14 +47,22 @@ otherwise you'd be syncing the same files through two services at once.
 
 ## Requirements
 
-- A [Proton account](https://proton.me/drive) (the free tier works — currently
-  2 GB, rising to 5 GB after a few onboarding actions; check current limits at
-  [proton.me/support/account/manage-account/storage](https://proton.me/support/account/manage-account/storage))
+- **A Proton account, created ahead of time in your browser.** This tool does
+  not and cannot create one for you — `proton-drive auth login` only
+  authenticates an *existing* account. Sign up free at
+  [proton.me/mail/signup](https://proton.me/mail/signup) (Drive is included
+  with any Proton account, no card required; free tier is currently 2 GB,
+  rising to 5 GB after a few onboarding actions — check current limits at
+  [proton.me/support/account/manage-account/storage](https://proton.me/support/account/manage-account/storage)).
+  If you don't have one yet, that's fine — `node backup.js setup` asks and
+  will wait for you to go create one before continuing.
 - [Node.js](https://nodejs.org/) 18 or newer
 - The official [Proton Drive CLI](https://proton.me/support/drive-cli)
   (`proton-drive`), installed and on your `PATH`. Grab a prebuilt binary from
   the [ProtonDriveApps/sdk](https://github.com/ProtonDriveApps/sdk) releases,
   or build it yourself with [Bun](https://bun.sh/) per that repo's `cli/README.md`.
+  If you skip this, `setup` tells you exactly where to get it and stops there
+  — safe to run before you've installed anything.
 
 ## Setup
 
@@ -66,15 +74,18 @@ node backup.js setup
 
 `setup` will:
 
-1. Check that the `proton-drive` binary is on your `PATH` (and tell you where
+1. Ask whether you already have a Proton account. If not, it prints the
+   signup link and **waits** — type `done` once you've created one, and it
+   continues from there. No account, no login, so this has to come first.
+2. Check that the `proton-drive` binary is on your `PATH` (and tell you where
    to get it if it isn't).
-2. Ask where you want your local vault folder (default
+3. Ask where you want your local vault folder (default
    `~/Documents/proton-vault`) and create it.
-3. Ask which remote Proton Drive folder to sync it to (default
+4. Ask which remote Proton Drive folder to sync it to (default
    `/backups/<your-hostname>`).
-4. Run `proton-drive auth login`, which opens your browser. Finish the Proton
+5. Run `proton-drive auth login`, which opens your browser. Finish the Proton
    login there, then come back to the terminal.
-5. Verify the login worked.
+6. Verify the login worked.
 
 You only need to do this once per machine per Proton account. The CLI caches
 your session in your OS's secure credential store, so you won't be asked to

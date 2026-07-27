@@ -54,12 +54,43 @@ function remoteFolder() {
   return process.env.PROTON_BACKUP_FOLDER || config.remoteFolder || defaultRemoteFolder();
 }
 
+// Manual line-queue readline, not repeated rl.question() calls: with piped
+// (non-TTY) stdin, Node can deliver multiple buffered lines before a second
+// question() is registered, and any line arriving without a pending listener
+// is silently dropped. A persistent 'line' listener + FIFO queue is reliable
+// for both interactive and piped input.
+let rlInstance = null;
+let lineQueue = [];
+let lineWaiters = [];
+
+function getReadline() {
+  if (!rlInstance) {
+    rlInstance = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rlInstance.on('line', (line) => {
+      if (lineWaiters.length) lineWaiters.shift()(line);
+      else lineQueue.push(line);
+    });
+  }
+  return rlInstance;
+}
+
+function closeReadline() {
+  if (rlInstance) {
+    rlInstance.close();
+    rlInstance = null;
+  }
+}
+
 function ask(question) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => rl.question(question, (answer) => {
-    rl.close();
-    resolve(answer.trim());
-  }));
+  getReadline();
+  process.stdout.write(question);
+  return new Promise((resolve) => {
+    if (lineQueue.length) {
+      resolve(lineQueue.shift().trim());
+    } else {
+      lineWaiters.push((line) => resolve(line.trim()));
+    }
+  });
 }
 
 function binaryExists() {
@@ -106,7 +137,30 @@ function ensureVault(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+async function ensureProtonAccount() {
+  const has = await ask('Do you already have a Proton account (proton.me)? [y/N]: ');
+  if (/^y/i.test(has.trim())) return;
+
+  console.log('\nYou need a free Proton account before you can log in.');
+  console.log('Sign up here (Drive is included with any Proton account, no card required):');
+  console.log('  https://proton.me/mail/signup\n');
+
+  for (;;) {
+    const answer = await ask('Type "done" once you have created your account (or "skip" to stop here): ');
+    const normalized = answer.trim().toLowerCase();
+    if (normalized === 'done' || normalized === 'y' || normalized === 'yes') {
+      return;
+    }
+    if (normalized === 'skip') {
+      console.log('\nOkay. Re-run "node backup.js setup" once you have a Proton account.');
+      process.exit(0);
+    }
+    console.log('Waiting for you to finish creating an account at https://proton.me/mail/signup ...');
+  }
+}
+
 async function cmdSetup() {
+  await ensureProtonAccount();
   ensureBinary();
 
   const config = loadConfig();
@@ -120,6 +174,8 @@ async function cmdSetup() {
   const chosenFolder = await ask(`Remote backup folder [${currentFolder}]: `);
   const folder = chosenFolder || currentFolder;
   config.remoteFolder = folder;
+
+  closeReadline(); // release stdin cleanly before spawning `proton-drive auth login` with inherited stdio
 
   saveConfig(config);
   ensureVault(vault);
