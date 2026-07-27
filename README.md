@@ -4,6 +4,31 @@ A small, cross-platform wrapper around Proton's **official Proton Drive CLI**
 that keeps a local "vault" folder synced to a dedicated Proton Drive folder,
 as a secure, encrypted offsite copy.
 
+## Give this to a friend
+
+If someone handed you this repo's URL, paste this into your AI coding
+assistant (Claude, ChatGPT, etc.) to get set up:
+
+> Clone the repo at https://github.com/alex-feldman/proton-drive-backup and
+> install it. It needs Node.js and the official Proton Drive CLI
+> (https://proton.me/support/drive-cli) — check for both and tell me if
+> either is missing, with instructions to get them. Then run
+> `node backup.js setup` and walk me through it: it will ask if I have a
+> Proton account already, and if not it will wait for me to create one at
+> proton.me before continuing. It will also ask where I want my local vault
+> folder and which remote folder to use — the defaults are fine unless I say
+> otherwise. It finishes with a browser login; tell me when to switch to my
+> browser and when to come back.
+
+Once setup finishes, a good "does this actually work" follow-up prompt:
+
+> Tell me a file to back up, then run `node backup.js add <that file>`.
+> After it finishes, tell me to check https://drive.proton.me in my browser
+> to confirm it's really there.
+
+That's the whole flow — no other instructions needed. Everything below is
+reference detail for anyone who wants to understand how it works.
+
 ## What this is (and isn't)
 
 **This is a secure encrypted file drop, not a versioned backup.** There is no
