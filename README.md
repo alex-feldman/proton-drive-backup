@@ -169,13 +169,20 @@ Because both directions are add-only, there is no sequence of `pull` and
 vault and then running `pull` followed by `sync` just re-establishes both
 copies, it can't erase anything.
 
+Both `sync` and `pull` pass `-d merge -f replace` to the underlying CLI:
+folders merge instead of colliding (this is what makes repeated `sync`/`pull`
+runs safe to re-run — an earlier version of this tool didn't do this and
+could report a false "skipped" conflict on the vault's own previously
+transferred folder), and file conflicts resolve in favor of whichever side
+is actively running the command.
+
 What this does **not** give you: live sync (changes only move when you run
-`sync`/`pull`), conflict resolution (if two machines both create a file
-with the same name before syncing, whichever uploads last is what the
-official CLI decides to keep — untested, since it depends on the CLI's own
-conflict behavior), or deletion propagation (deleting a file on one machine
-and syncing does not remove it from the shared folder or from any other
-machine's vault).
+`sync`/`pull`), or deletion propagation (deleting a file on one machine and
+syncing does not remove it from the shared folder or from any other
+machine's vault). If two machines both create a file with the same name
+before syncing, whichever machine runs `sync` last wins (file conflicts
+always replace) — there's no merge-both-versions option for files, only
+for folders.
 
 ### If your AI agent is running `setup` for you
 
@@ -224,6 +231,9 @@ node backup.js get some-file.pdf ./restored/
 # lost vault, or catch a machine up on a shared vault)
 node backup.js pull
 
+# Convenience: pull, then sync, so both sides end up with everything
+node backup.js both
+
 # Check whether your login session is still valid, without syncing anything
 node backup.js check
 ```
@@ -261,6 +271,10 @@ touch, share, or depend on anyone else's data, bucket, or account.
 - `sync` re-uploads the whole vault folder each time via the CLI's own
   recursive upload, rather than diffing file-by-file — simple and robust, at
   the cost of some redundant transfer on a large, mostly-unchanged vault.
+- Native Proton Docs/Sheets items (created directly in the Proton Drive web
+  app, not uploaded files) cannot be pulled down — the CLI skips them by
+  design. Not something this tool can work around; only affects `pull`, and
+  only for that specific native item type.
 - Automatic CLI install only covers Windows/macOS/Linux on x64/arm64 glibc.
   Linux musl (e.g. Alpine) and anything else isn't auto-installed — `setup`
   will tell you and point at manual install instructions instead.

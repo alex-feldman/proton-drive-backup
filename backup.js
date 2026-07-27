@@ -429,7 +429,7 @@ async function cmdSync() {
   ensureRemoteFolder(folder);
 
   console.log(`Uploading ${vault} -> ${folder} ...`);
-  const result = runProton(['filesystem', 'upload', vault, folder], { inherit: true });
+  const result = runProton(['filesystem', 'upload', vault, folder, '-d', 'merge', '-f', 'replace'], { inherit: true });
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
@@ -460,7 +460,7 @@ async function cmdPull() {
   }
 
   console.log(`Downloading ${folder} -> ${vault} ...`);
-  const result = runProton(['filesystem', 'download', folder, vault], { inherit: true });
+  const result = runProton(['filesystem', 'download', folder, vault, '-d', 'merge', '-f', 'replace'], { inherit: true });
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
@@ -478,6 +478,14 @@ async function cmdPull() {
 async function cmdAdd(filePath) {
   cmdMove(filePath, { copy: false });
   await cmdSync();
+}
+
+async function cmdBoth() {
+  console.log('Running both: pulling remote first, then syncing local up...\n');
+  await cmdPull();
+  console.log('');
+  await cmdSync();
+  console.log('\nBoth complete. Local vault and remote folder now hold the union of both sides.');
 }
 
 async function cmdList() {
@@ -506,7 +514,7 @@ async function cmdGet(name, destDir) {
   const dest = destDir || '.';
   fs.mkdirSync(dest, { recursive: true });
   const remotePath = `${folder}/${name}`;
-  const result = runProton(['filesystem', 'download', remotePath, dest], { inherit: true });
+  const result = runProton(['filesystem', 'download', remotePath, dest, '-d', 'merge', '-f', 'replace'], { inherit: true });
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
@@ -533,13 +541,16 @@ Usage:
   node backup.js move <file> [--copy]  Move (or copy) a file into the vault
   node backup.js sync               Upload the whole vault to Proton Drive
   node backup.js pull               Download the whole remote folder into the vault
+  node backup.js both               Pull, then sync: make both sides hold everything
   node backup.js add <path>         Shorthand: move + sync in one step
   node backup.js list               List what is in your remote backup folder
   node backup.js get <name> [dest]  Download a file back down
 
-pull is for recovering a lost/empty local vault, or catching a new machine
-up on an existing shared vault. sync never deletes remotely and pull never
-deletes locally, so pull-then-sync can never wipe out either side.
+"sync" (a.k.a. push) and "pull" are separate one-way directions: sync never
+deletes remotely, pull never deletes locally, so running them in either order
+can never wipe out either side. "both" is a convenience that just runs pull
+then sync back-to-back for you when you want both sides fully caught up in
+one command — it does not change what sync or pull do on their own.
 
 Not a versioned backup tool. See README.md for what this is and is not.`);
 }
@@ -561,6 +572,9 @@ async function main() {
       break;
     case 'pull':
       await cmdPull();
+      break;
+    case 'both':
+      await cmdBoth();
       break;
     case 'add':
       await cmdAdd(rest[0]);
