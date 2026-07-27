@@ -53,12 +53,17 @@ function defaultRemoteFolder() {
 // existing config.json (saved before this fix) self-heals on next read
 // without anyone needing to hand-edit it.
 function normalizeRemoteFolder(folder) {
-  let f = folder.trim();
+  let f = folder.trim().replace(/\/+$/, '');
   if (!f.startsWith('/')) f = '/' + f;
   if (f !== '/my-files' && !f.startsWith('/my-files/')) {
     f = '/my-files' + f;
   }
-  return f;
+  return f || '/my-files';
+}
+
+/** Shared primitive: does `path` exist and list cleanly? */
+function listPath(remotePath) {
+  return runProton(['filesystem', 'list', remotePath, '--json']);
 }
 
 function vaultPath() {
@@ -322,7 +327,7 @@ async function cmdSetup() {
   }
 
   console.log('\nVerifying the session...');
-  const check = runProton(['filesystem', 'list', folder, '--json']);
+  const check = listPath(folder);
   if (!check.ok) {
     console.log(`Folder "${folder}" was not found yet — that is expected on first use.`);
     console.log('It will be created automatically the first time you run "node backup.js sync".');
@@ -348,7 +353,7 @@ async function cmdSetup() {
 async function cmdCheck() {
   await ensureBinary();
   const folder = remoteFolder();
-  const result = runProton(['filesystem', 'list', folder, '--json']);
+  const result = listPath(folder);
   if (result.ok) {
     console.log(`Session OK. "${folder}" is reachable.`);
     return;
@@ -378,7 +383,7 @@ function ensureRemoteFolder(folder) {
   for (let i = 1; i < segments.length; i++) {
     const name = segments[i];
     const next = `${current}/${name}`;
-    const check = runProton(['filesystem', 'list', next, '--json']);
+    const check = listPath(next);
     if (!check.ok && !check.authFailure) {
       console.log(`Remote folder "${next}" not found — creating it...`);
       runProton(['filesystem', 'create-folder', current, name]);
@@ -443,6 +448,17 @@ async function cmdPull() {
   ensureVault(vault);
   const folder = remoteFolder();
 
+  const precheck = listPath(folder);
+  if (!precheck.ok) {
+    if (precheck.authFailure) {
+      printAuthHelp();
+      process.exitCode = 1;
+    } else {
+      console.log(`"${folder}" doesn't exist yet — nothing to pull.`);
+    }
+    return;
+  }
+
   console.log(`Downloading ${folder} -> ${vault} ...`);
   const result = runProton(['filesystem', 'download', folder, vault], { inherit: true });
   if (!result.ok) {
@@ -467,14 +483,15 @@ async function cmdAdd(filePath) {
 async function cmdList() {
   await ensureBinary();
   const folder = remoteFolder();
-  const result = runProton(['filesystem', 'list', folder, '--json']);
+  const result = listPath(folder);
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
-    } else {
-      console.error(`Nothing found at "${folder}" yet, or it does not exist.`);
+      process.exitCode = 1;
+      return;
     }
-    process.exit(1);
+    console.log(`"${folder}" doesn't exist yet — nothing to list.`);
+    return;
   }
   console.log(result.stdout.trim() || '(empty)');
 }
@@ -487,6 +504,7 @@ async function cmdGet(name, destDir) {
   await ensureBinary();
   const folder = remoteFolder();
   const dest = destDir || '.';
+  fs.mkdirSync(dest, { recursive: true });
   const remotePath = `${folder}/${name}`;
   const result = runProton(['filesystem', 'download', remotePath, dest], { inherit: true });
   if (!result.ok) {
