@@ -22,7 +22,7 @@ assistant (Claude, ChatGPT, etc.) to get set up:
 
 Once setup finishes, a good "does this actually work" follow-up prompt:
 
-> Tell me a file to back up, then run `node backup.js add <that file>`.
+> Ask me which file I want to back up, then run `node backup.js add` on it.
 > After it finishes, tell me to check https://drive.proton.me in my browser
 > to confirm it's really there.
 
