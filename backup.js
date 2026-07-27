@@ -321,21 +321,28 @@ async function cmdSetup() {
   console.log('\nSetup complete. You should not need to log in again until your session eventually expires.');
 }
 
+/**
+ * Exit code is the real signal here, not just the printed text: 0 means
+ * "safe to proceed" (session valid, or the only problem is a folder that
+ * doesn't exist yet — harmless, sync creates it), non-zero means "you need
+ * to re-run setup." A missing/unreachable folder is deliberately treated as
+ * success, not failure — only an auth-shaped error sets a non-zero exit.
+ */
 async function cmdCheck() {
   await ensureBinary();
   const folder = remoteFolder();
   const result = runProton(['filesystem', 'list', folder, '--json']);
   if (result.ok) {
     console.log(`Session OK. "${folder}" is reachable.`);
-    return true;
+    return;
   }
   if (result.authFailure) {
     printAuthHelp();
-  } else {
-    console.error(`Could not reach "${folder}" (it may not exist yet — that is fine before your first sync).`);
-    console.error(result.stderr.trim() || result.stdout.trim());
+    process.exitCode = 1;
+    return;
   }
-  return false;
+  console.log(`"${folder}" was not reachable, but that's expected if it doesn't exist yet`);
+  console.log('(it gets created automatically on first sync) — not treated as a failure.');
 }
 
 function cmdMove(filePath, opts = {}) {
