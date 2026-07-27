@@ -125,7 +125,10 @@ node backup.js setup
    [shared vault](#shared-vaults-across-multiple-computers-advanced) you'll
    connect from more than one computer.
 5. Ask which remote Proton Drive folder to sync it to (default
-   `/backups/<your-hostname>` for per-machine, `/backups/shared` for shared).
+   `/my-files/backups/<your-hostname>` for per-machine,
+   `/my-files/backups/shared` for shared). Proton Drive's root namespace is
+   `/my-files` — if you type a folder without that prefix, it's added for
+   you automatically.
 6. Run `proton-drive auth login`, which opens your browser. Finish the Proton
    login there, then come back to the terminal.
 7. Verify the login worked. If the remote folder already exists (typically
@@ -140,11 +143,11 @@ log in again until that session eventually expires.
 ## Shared vaults across multiple computers (advanced)
 
 By default, every machine gets its own remote folder
-(`/backups/<hostname>`) — completely independent backups, nothing expected
-to appear on a second computer. If you want one vault visible from multiple
-machines instead, choose "shared" when `setup` asks, and **use the exact
-same remote folder name on every machine** you connect (the default
-`/backups/shared` is fine, or pick your own).
+(`/my-files/backups/<hostname>`) — completely independent backups, nothing
+expected to appear on a second computer. If you want one vault visible from
+multiple machines instead, choose "shared" when `setup` asks, and **use the
+exact same remote folder name on every machine** you connect (the default
+`/my-files/backups/shared` is fine, or pick your own).
 
 This tool does not do two-way sync. `sync` only uploads; it is a one-way
 push from your local vault to the remote folder, and it never deletes
@@ -262,9 +265,11 @@ touch, share, or depend on anyone else's data, bucket, or account.
   Linux musl (e.g. Alpine) and anything else isn't auto-installed — `setup`
   will tell you and point at manual install instructions instead.
 - The official Proton Drive CLI is new (shipped June 2026) and its exact
-  command syntax may shift between versions. The commands in `backup.js` are
-  verified against CLI `0.6.0`; if a command starts failing with something
-  that looks like a usage error rather than an auth error, check
+  command syntax may shift between versions. The commands in `backup.js`,
+  including the `/my-files` root-namespace path and the parent-folder
+  auto-create logic, are verified against CLI `0.6.0` live on a real
+  authenticated account (2026-07-28); if a command starts failing with
+  something that looks like a usage error rather than an auth error, check
   `proton-drive --help` — the syntax may have moved on since this was
   written. Please open an issue or send a fix.
 

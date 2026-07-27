@@ -47,6 +47,20 @@ function defaultRemoteFolder() {
   return `/backups/${hostname}`;
 }
 
+// CLI 0.6.0's root namespace is "/my-files" — a bare "/backups/..." path is
+// not valid on its own. Verified live against a real authenticated account
+// 2026-07-28. Applied here, at the single read choke point, so every
+// existing config.json (saved before this fix) self-heals on next read
+// without anyone needing to hand-edit it.
+function normalizeRemoteFolder(folder) {
+  let f = folder.trim();
+  if (!f.startsWith('/')) f = '/' + f;
+  if (f !== '/my-files' && !f.startsWith('/my-files/')) {
+    f = '/my-files' + f;
+  }
+  return f;
+}
+
 function vaultPath() {
   const config = loadConfig();
   return process.env.PROTON_VAULT_PATH || config.vaultPath || defaultVaultPath();
@@ -54,7 +68,8 @@ function vaultPath() {
 
 function remoteFolder() {
   const config = loadConfig();
-  return process.env.PROTON_BACKUP_FOLDER || config.remoteFolder || defaultRemoteFolder();
+  const raw = process.env.PROTON_BACKUP_FOLDER || config.remoteFolder || defaultRemoteFolder();
+  return normalizeRemoteFolder(raw);
 }
 
 /** Resolution order: explicit env override > a binary this tool installed itself > PATH. */
@@ -276,14 +291,16 @@ async function cmdSetup() {
     'from multiple computers (advanced)? [per-machine/shared, default per-machine]: '
   );
   const shared = /^shared/i.test(modeAnswer.trim());
-  const remoteDefault = config.remoteFolder || (shared ? '/backups/shared' : defaultRemoteFolder());
+  const remoteDefault = normalizeRemoteFolder(
+    config.remoteFolder || (shared ? '/backups/shared' : defaultRemoteFolder())
+  );
   if (shared) {
     console.log('\nShared mode: use this exact same remote folder name on every machine');
     console.log('you want connected to this vault.');
   }
 
   const chosenFolder = await ask(`Remote backup folder [${remoteDefault}]: `);
-  const folder = chosenFolder || remoteDefault;
+  const folder = normalizeRemoteFolder(chosenFolder || remoteDefault);
   config.remoteFolder = folder;
 
   closeReadline(); // release stdin cleanly before spawning `proton-drive auth login` with inherited stdio
@@ -345,6 +362,31 @@ async function cmdCheck() {
   console.log('(it gets created automatically on first sync) — not treated as a failure.');
 }
 
+/**
+ * `filesystem upload` does not create missing parent folders on its own
+ * (verified live 2026-07-28: uploading into a non-existent chain fails
+ * outright). Walk the target path and create whatever segments are missing
+ * with `filesystem create-folder`, below the root namespace itself (the
+ * first segment, e.g. "my-files" — that's intrinsic, never created here).
+ * Best-effort: any failure here just falls through to the real upload/
+ * download call, which reports the actual error if something is still wrong.
+ */
+function ensureRemoteFolder(folder) {
+  const segments = folder.split('/').filter(Boolean);
+  if (segments.length <= 1) return;
+  let current = '/' + segments[0];
+  for (let i = 1; i < segments.length; i++) {
+    const name = segments[i];
+    const next = `${current}/${name}`;
+    const check = runProton(['filesystem', 'list', next, '--json']);
+    if (!check.ok && !check.authFailure) {
+      console.log(`Remote folder "${next}" not found — creating it...`);
+      runProton(['filesystem', 'create-folder', current, name]);
+    }
+    current = next;
+  }
+}
+
 function cmdMove(filePath, opts = {}) {
   if (!filePath) {
     console.error('Usage: node backup.js move <file> [--copy]');
@@ -378,6 +420,8 @@ async function cmdSync() {
     console.log(`Vault at ${vault} is empty — nothing to sync.`);
     return;
   }
+
+  ensureRemoteFolder(folder);
 
   console.log(`Uploading ${vault} -> ${folder} ...`);
   const result = runProton(['filesystem', 'upload', vault, folder], { inherit: true });
