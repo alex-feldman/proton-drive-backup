@@ -3,12 +3,12 @@
 
 /**
  * proton-drive-backup — a thin wrapper around the official Proton Drive CLI
- * (`proton-drive`) for dropping files into a dedicated, per-machine encrypted
- * folder. Not a versioned backup tool — see README.md.
+ * (`proton-drive`) for keeping a local "vault" folder synced to a dedicated,
+ * encrypted Proton Drive folder. Not a versioned backup tool — see README.md.
  *
  * The `proton-drive` CLI shipped June 2026 and its exact subcommand syntax
  * may drift. If a command below stops matching `proton-drive --help`,
- * update the CLI_* constants and PROTON_BIN invocations to match.
+ * update the PROTON_BIN invocations to match.
  */
 
 const { spawnSync } = require('child_process');
@@ -35,9 +35,18 @@ function saveConfig(config) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
 }
 
+function defaultVaultPath() {
+  return path.join(os.homedir(), 'Documents', 'proton-vault');
+}
+
 function defaultRemoteFolder() {
   const hostname = os.hostname().replace(/[^a-zA-Z0-9._-]/g, '-');
   return `/backups/${hostname}`;
+}
+
+function vaultPath() {
+  const config = loadConfig();
+  return process.env.PROTON_VAULT_PATH || config.vaultPath || defaultVaultPath();
 }
 
 function remoteFolder() {
@@ -93,15 +102,33 @@ function ensureBinary() {
   }
 }
 
+function ensureVault(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
 async function cmdSetup() {
   ensureBinary();
 
   const config = loadConfig();
+
+  const currentVault = config.vaultPath || defaultVaultPath();
+  const chosenVault = await ask(`Local vault folder [${currentVault}]: `);
+  const vault = chosenVault || currentVault;
+  config.vaultPath = vault;
+
   const currentFolder = config.remoteFolder || defaultRemoteFolder();
-  const chosen = await ask(`Remote backup folder [${currentFolder}]: `);
-  const folder = chosen || currentFolder;
+  const chosenFolder = await ask(`Remote backup folder [${currentFolder}]: `);
+  const folder = chosenFolder || currentFolder;
   config.remoteFolder = folder;
+
   saveConfig(config);
+  ensureVault(vault);
+  console.log(`\nVault folder ready at: ${vault}`);
+  console.log('This is a plain local folder. Drop files into it however you like');
+  console.log('(this command, or your OS file browser), then run "node backup.js sync".');
+  console.log('If this folder lives inside something already cloud-synced (OneDrive,');
+  console.log('iCloud Drive, etc.), consider picking a different location to avoid');
+  console.log('double-syncing the same files through two services.');
 
   console.log('\nOpening Proton Drive login. Finish the login in your browser, then return here.\n');
   const login = runProton(['auth', 'login'], { inherit: true });
@@ -114,8 +141,7 @@ async function cmdSetup() {
   const check = runProton(['filesystem', 'list', folder, '--json']);
   if (!check.ok) {
     console.log(`Folder "${folder}" was not found yet — that is expected on first use.`);
-    console.log('It will be created automatically the first time you upload something with:');
-    console.log(`  node backup.js add <file>`);
+    console.log('It will be created automatically the first time you run "node backup.js sync".');
   } else {
     console.log(`Session verified. Remote folder "${folder}" is ready.`);
   }
@@ -134,33 +160,63 @@ function cmdCheck() {
   if (result.authFailure) {
     printAuthHelp();
   } else {
-    console.error(`Could not reach "${folder}" (it may not exist yet — that is fine before your first upload).`);
+    console.error(`Could not reach "${folder}" (it may not exist yet — that is fine before your first sync).`);
     console.error(result.stderr.trim() || result.stdout.trim());
   }
   return false;
 }
 
-function cmdAdd(filePath) {
+function cmdMove(filePath, opts = {}) {
   if (!filePath) {
-    console.error('Usage: node backup.js add <file-or-folder>');
+    console.error('Usage: node backup.js move <file> [--copy]');
     process.exit(1);
   }
-  ensureBinary();
   if (!fs.existsSync(filePath)) {
-    console.error(`No such file or folder: ${filePath}`);
+    console.error(`No such file: ${filePath}`);
     process.exit(1);
   }
+  const vault = vaultPath();
+  ensureVault(vault);
+  const dest = path.join(vault, path.basename(filePath));
+  if (opts.copy) {
+    fs.copyFileSync(filePath, dest);
+    console.log(`Copied into vault: ${dest}`);
+  } else {
+    fs.renameSync(filePath, dest);
+    console.log(`Moved into vault: ${dest}`);
+  }
+  console.log('Run "node backup.js sync" when you are ready to upload the vault.');
+}
+
+function cmdSync() {
+  ensureBinary();
+  const vault = vaultPath();
+  ensureVault(vault);
   const folder = remoteFolder();
-  const result = runProton(['filesystem', 'upload', filePath, folder], { inherit: true });
+
+  const entries = fs.readdirSync(vault).filter((name) => name !== 'config.json' && !name.startsWith('.'));
+  if (entries.length === 0) {
+    console.log(`Vault at ${vault} is empty — nothing to sync.`);
+    return;
+  }
+
+  console.log(`Uploading ${vault} -> ${folder} ...`);
+  const result = runProton(['filesystem', 'upload', vault, folder], { inherit: true });
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
     } else {
-      console.error(`Upload failed. If this keeps happening, check "proton-drive --help" — the CLI's command syntax may have changed since this tool was written.`);
+      console.error('Sync failed. If this keeps happening, check "proton-drive --help" — the CLI\'s command syntax may have changed since this tool was written.');
     }
     process.exit(1);
   }
-  console.log(`\nUploaded to ${folder}. Confirm it in your browser at https://drive.proton.me`);
+  console.log(`\nSync complete. Confirm it in your browser at https://drive.proton.me`);
+  console.log('Note: sync only uploads. Removing a file from the vault does not delete it remotely.');
+}
+
+function cmdAdd(filePath) {
+  cmdMove(filePath, { copy: false });
+  cmdSync();
 }
 
 function cmdList() {
@@ -202,11 +258,17 @@ function cmdGet(name, destDir) {
 function printHelp() {
   console.log(`proton-drive-backup — simple encrypted file drop on Proton Drive
 
+A local "vault" folder (default ~/Documents/proton-vault) mirrors to a
+dedicated Proton Drive folder. Organize the vault with this CLI or your
+OS file browser, then sync.
+
 Usage:
-  node backup.js setup              One-time login + remote folder setup
+  node backup.js setup              One-time: vault + remote folder + login
   node backup.js check              Verify your session is still valid
-  node backup.js add <path>         Upload a file or folder
-  node backup.js list               List what is in your backup folder
+  node backup.js move <file> [--copy]  Move (or copy) a file into the vault
+  node backup.js sync               Upload the whole vault to Proton Drive
+  node backup.js add <path>         Shorthand: move + sync in one step
+  node backup.js list               List what is in your remote backup folder
   node backup.js get <name> [dest]  Download a file back down
 
 Not a versioned backup tool. See README.md for what this is and is not.`);
@@ -220,6 +282,12 @@ async function main() {
       break;
     case 'check':
       cmdCheck();
+      break;
+    case 'move':
+      cmdMove(rest.find((a) => a !== '--copy'), { copy: rest.includes('--copy') });
+      break;
+    case 'sync':
+      cmdSync();
       break;
     case 'add':
       cmdAdd(rest[0]);
