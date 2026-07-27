@@ -271,9 +271,19 @@ async function cmdSetup() {
   const vault = chosenVault || currentVault;
   config.vaultPath = vault;
 
-  const currentFolder = config.remoteFolder || defaultRemoteFolder();
-  const chosenFolder = await ask(`Remote backup folder [${currentFolder}]: `);
-  const folder = chosenFolder || currentFolder;
+  const modeAnswer = await ask(
+    'Is this vault specific to this machine, or a shared vault you will connect ' +
+    'from multiple computers (advanced)? [per-machine/shared, default per-machine]: '
+  );
+  const shared = /^shared/i.test(modeAnswer.trim());
+  const remoteDefault = config.remoteFolder || (shared ? '/backups/shared' : defaultRemoteFolder());
+  if (shared) {
+    console.log('\nShared mode: use this exact same remote folder name on every machine');
+    console.log('you want connected to this vault.');
+  }
+
+  const chosenFolder = await ask(`Remote backup folder [${remoteDefault}]: `);
+  const folder = chosenFolder || remoteDefault;
   config.remoteFolder = folder;
 
   closeReadline(); // release stdin cleanly before spawning `proton-drive auth login` with inherited stdio
@@ -300,7 +310,12 @@ async function cmdSetup() {
     console.log(`Folder "${folder}" was not found yet — that is expected on first use.`);
     console.log('It will be created automatically the first time you run "node backup.js sync".');
   } else {
-    console.log(`Session verified. Remote folder "${folder}" is ready.`);
+    console.log(`Session verified. Remote folder "${folder}" already exists — it may have`);
+    console.log('files in it already (from another machine, or a previous install here).');
+    const pull = await ask('Pull them into your local vault now? [Y/n]: ');
+    if (!/^n/i.test(pull.trim())) {
+      await cmdPull();
+    }
   }
 
   console.log('\nSetup complete. You should not need to log in again until your session eventually expires.');
@@ -371,6 +386,28 @@ async function cmdSync() {
   console.log('Note: sync only uploads. Removing a file from the vault does not delete it remotely.');
 }
 
+async function cmdPull() {
+  await ensureBinary();
+  const vault = vaultPath();
+  ensureVault(vault);
+  const folder = remoteFolder();
+
+  console.log(`Downloading ${folder} -> ${vault} ...`);
+  const result = runProton(['filesystem', 'download', folder, vault], { inherit: true });
+  if (!result.ok) {
+    if (result.authFailure) {
+      printAuthHelp();
+    } else {
+      console.error('Pull failed. If this keeps happening, check "proton-drive --help" — the CLI\'s command syntax may have changed since this tool was written.');
+    }
+    process.exit(1);
+  }
+  console.log('\nPull complete.');
+  console.log('Note: pull only adds/updates files locally — it does not delete anything from');
+  console.log('your vault that is not present remotely. Combined with sync\'s matching');
+  console.log('upload-only guarantee, neither command can ever wipe out the other side.');
+}
+
 async function cmdAdd(filePath) {
   cmdMove(filePath, { copy: false });
   await cmdSync();
@@ -426,9 +463,14 @@ Usage:
   node backup.js check              Verify your session is still valid
   node backup.js move <file> [--copy]  Move (or copy) a file into the vault
   node backup.js sync               Upload the whole vault to Proton Drive
+  node backup.js pull               Download the whole remote folder into the vault
   node backup.js add <path>         Shorthand: move + sync in one step
   node backup.js list               List what is in your remote backup folder
   node backup.js get <name> [dest]  Download a file back down
+
+pull is for recovering a lost/empty local vault, or catching a new machine
+up on an existing shared vault. sync never deletes remotely and pull never
+deletes locally, so pull-then-sync can never wipe out either side.
 
 Not a versioned backup tool. See README.md for what this is and is not.`);
 }
@@ -447,6 +489,9 @@ async function main() {
       break;
     case 'sync':
       await cmdSync();
+      break;
+    case 'pull':
+      await cmdPull();
       break;
     case 'add':
       await cmdAdd(rest[0]);
