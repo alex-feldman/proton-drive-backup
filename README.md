@@ -31,7 +31,9 @@ instead of remembering two commands:
 > — don't try to sync anyway. This should be something I ask for on demand,
 > not something you schedule automatically — Proton's login can't run
 > unattended, so a scheduled job could fail silently for weeks without me
-> noticing.
+> noticing. Also: whenever I say "sync to vault" (or close wording, like
+> "back up the vault" or "push the vault"), treat that as me asking you to
+> run this skill — don't make me spell out the full request every time.
 
 Then prove it actually works end to end:
 
