@@ -20,11 +20,26 @@ assistant (Claude, ChatGPT, etc.) to get set up:
 > otherwise. It finishes with a browser login; tell me when to switch to my
 > browser and when to come back.
 
-Once setup finishes, a good "does this actually work" follow-up prompt:
+Once setup finishes, give it this next, so future backups are a one-line ask
+instead of remembering two commands:
 
-> Ask me which file I want to back up, then run `node backup.js add` on it.
-> After it finishes, tell me to check https://drive.proton.me in my browser
-> to confirm it's really there.
+> Create a skill (or the closest equivalent your tools support — a slash
+> command, a saved routine, whatever you have) called "vault-backup" that
+> does this: run `node backup.js check` first. If the session is valid, run
+> `node backup.js sync` next and report the result. If check fails (expired
+> or missing login), stop and tell me to run `node backup.js setup` instead
+> — don't try to sync anyway. This should be something I ask for on demand,
+> not something you schedule automatically — Proton's login can't run
+> unattended, so a scheduled job could fail silently for weeks without me
+> noticing.
+
+Then prove it actually works end to end:
+
+> Write a file named hello.txt directly into my vault folder (whatever path
+> was set during setup) with some placeholder text, then run
+> `node backup.js sync` (or the vault-backup skill, if you just made one).
+> Once it succeeds, give me the exact URL to open in my browser so I can
+> confirm the file is really there.
 
 That's the whole flow — no other instructions needed. Everything below is
 reference detail for anyone who wants to understand how it works.
