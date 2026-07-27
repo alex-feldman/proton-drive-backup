@@ -169,12 +169,14 @@ Because both directions are add-only, there is no sequence of `pull` and
 vault and then running `pull` followed by `sync` just re-establishes both
 copies, it can't erase anything.
 
-Both `sync` and `pull` pass `-d merge -f replace` to the underlying CLI:
-folders merge instead of colliding (this is what makes repeated `sync`/`pull`
-runs safe to re-run — an earlier version of this tool didn't do this and
-could report a false "skipped" conflict on the vault's own previously
-transferred folder), and file conflicts resolve in favor of whichever side
-is actively running the command.
+Both `sync` and `pull` transfer the *contents* of the vault/remote folder
+item by item, never the folder itself, and pass `-d merge -f replace` to the
+underlying CLI so folders merge instead of colliding and files resolve in
+favor of whichever side is actively running the command. (An earlier version
+transferred the whole folder in one call, which nested one more level of
+"vault name" or "remote folder name" every time you alternated `pull` and
+`sync` — compounding indefinitely with repeated use. Fixed 2026-07-28,
+verified live across five alternating rounds with zero nesting.)
 
 What this does **not** give you: live sync (changes only move when you run
 `sync`/`pull`), or deletion propagation (deleting a file on one machine and

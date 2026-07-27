@@ -414,6 +414,17 @@ function cmdMove(filePath, opts = {}) {
   console.log('Run "node backup.js sync" when you are ready to upload the vault.');
 }
 
+/**
+ * Both transfer directions move CONTENTS, never the container folder itself.
+ * `filesystem upload/download <folder> <dest>` places <folder> itself inside
+ * <dest> (not just what's in it) — passing the vault/remote folder wholesale
+ * meant every sync nested one more "vault name" level under the remote
+ * folder, and every pull nested one more "remote folder name" level under
+ * the vault. Alternating pull/sync (or running `both`) compounded that
+ * nesting indefinitely (found live 2026-07-28: four levels deep after a few
+ * rounds). Enumerating and transferring each top-level item individually
+ * avoids ever re-wrapping a folder in a copy of its own name.
+ */
 async function cmdSync() {
   await ensureBinary();
   const vault = vaultPath();
@@ -428,8 +439,9 @@ async function cmdSync() {
 
   ensureRemoteFolder(folder);
 
-  console.log(`Uploading ${vault} -> ${folder} ...`);
-  const result = runProton(['filesystem', 'upload', vault, folder, '-d', 'merge', '-f', 'replace'], { inherit: true });
+  const localPaths = entries.map((name) => path.join(vault, name));
+  console.log(`Uploading ${entries.length} item(s) from ${vault} -> ${folder} ...`);
+  const result = runProton(['filesystem', 'upload', ...localPaths, folder, '-d', 'merge', '-f', 'replace'], { inherit: true });
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
@@ -459,8 +471,26 @@ async function cmdPull() {
     return;
   }
 
-  console.log(`Downloading ${folder} -> ${vault} ...`);
-  const result = runProton(['filesystem', 'download', folder, vault, '-d', 'merge', '-f', 'replace'], { inherit: true });
+  let children = [];
+  try {
+    const items = JSON.parse(precheck.stdout);
+    children = items.map((item) => item.name && item.name.value).filter(Boolean);
+  } catch (err) {
+    console.error(`Could not parse the item list for "${folder}" — the CLI's --json output may have changed since this tool was written.`);
+    process.exit(1);
+  }
+
+  if (children.length === 0) {
+    console.log(`"${folder}" is empty — nothing to pull.`);
+    return;
+  }
+
+  // Escape a literal "/" in a node name per the CLI's own path syntax
+  // ("Escape / in node names with a backslash"), so a slash in a filename
+  // isn't misread as a path separator.
+  const remotePaths = children.map((name) => `${folder}/${name.replace(/\//g, '\\/')}`);
+  console.log(`Downloading ${children.length} item(s) from ${folder} -> ${vault} ...`);
+  const result = runProton(['filesystem', 'download', ...remotePaths, vault, '-d', 'merge', '-f', 'replace'], { inherit: true });
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
