@@ -1,0 +1,17 @@
+{
+  "name": "proton-drive-backup",
+  "version": "1.0.0",
+  "description": "A thin wrapper around the official Proton Drive CLI for dropping files into a dedicated, encrypted Proton Drive folder. Not a versioned backup tool.",
+  "main": "backup.js",
+  "bin": {
+    "proton-backup": "./backup.js"
+  },
+  "scripts": {
+    "setup": "node backup.js setup",
+    "check": "node backup.js check"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
