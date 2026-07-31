@@ -286,7 +286,9 @@ touch, share, or depend on anyone else's data, bucket, or account.
   command syntax may shift between versions. The commands in `backup.js`,
   including the `/my-files` root-namespace path and the parent-folder
   auto-create logic, are verified against CLI `0.6.0` live on a real
-  authenticated account (2026-07-28); if a command starts failing with
+  authenticated account (2026-07-28), and re-verified against `0.7.0`
+  (2026-08-01: fresh-clone auto-install, `check`, `sync`, `list`, `get`,
+  and remote folder auto-create all pass); if a command starts failing with
   something that looks like a usage error rather than an auth error, check
   `proton-drive --help` — the syntax may have moved on since this was
   written. Please open an issue or send a fix.
