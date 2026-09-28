@@ -188,6 +188,40 @@ before syncing, whichever machine runs `sync` last wins (file conflicts
 always replace) — there's no merge-both-versions option for files, only
 for folders.
 
+## Multiple targets (advanced)
+
+By default there's one local<->remote pair: the vault folder from `setup`,
+synced to its one remote folder. If you want a second (or third, ...)
+independent pair under the same Proton login — say, a separate folder you
+back up as-is rather than funneling through the main vault — register it
+without repeating `setup` (no new login needed; one Proton session already
+covers the whole account):
+
+```bash
+node backup.js add-target <name> <local-path> <remote-folder>
+node backup.js targets              # list what's configured
+```
+
+Then pass `--target <name>` to any command to operate on that pair instead of
+the default vault:
+
+```bash
+node backup.js sync --target <name>
+node backup.js check --target <name>
+node backup.js pull --target <name>
+```
+
+Each target is fully independent: `sync --target a` never touches target
+`b`'s local or remote folder. The first (originally `setup`-created) target
+is always named `default` and needs no `--target` flag.
+
+**A caveat if you're on Windows and running these commands from Git Bash (or
+any MSYS2 shell):** the shell rewrites a leading `/` in a command argument
+into a Windows path before `node` ever sees it, so
+`node backup.js add-target x . /my-files/x` can silently write a mangled
+remote folder. Set `MSYS2_ARG_CONV_EXCL="*"` for the command if your remote
+folder argument starts with `/`.
+
 ### If your AI agent is running `setup` for you
 
 `setup` is genuinely interactive (an account yes/no question, optional vault

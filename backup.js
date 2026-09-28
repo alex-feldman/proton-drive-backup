@@ -66,15 +66,107 @@ function listPath(remotePath) {
   return runProton(['filesystem', 'list', remotePath, '--json']);
 }
 
-function vaultPath() {
-  const config = loadConfig();
-  return process.env.PROTON_VAULT_PATH || config.vaultPath || defaultVaultPath();
+/**
+ * Multiple targets: each is an independent { vaultPath, remoteFolder } pair
+ * under one Proton account/login. A config written before this feature
+ * existed has flat top-level vaultPath/remoteFolder instead of a `targets`
+ * map — treated as a single implicit "default" target, never rewritten
+ * just by reading it (only `add-target` migrates a config to the new shape,
+ * same as normalizeRemoteFolder's own self-heal-on-write pattern above).
+ */
+function resolveTarget(config, name) {
+  if (config.targets && config.targets[name]) return config.targets[name];
+  if (name === 'default' && !config.targets) {
+    return { vaultPath: config.vaultPath, remoteFolder: config.remoteFolder };
+  }
+  return null;
 }
 
-function remoteFolder() {
+function targetNames(config) {
+  if (config.targets) return Object.keys(config.targets);
+  return ['default'];
+}
+
+function vaultPath(targetName = 'default') {
   const config = loadConfig();
-  const raw = process.env.PROTON_BACKUP_FOLDER || config.remoteFolder || defaultRemoteFolder();
+  if (targetName === 'default' && process.env.PROTON_VAULT_PATH) return process.env.PROTON_VAULT_PATH;
+  const target = resolveTarget(config, targetName);
+  if (target && target.vaultPath) return target.vaultPath;
+  if (targetName === 'default') return defaultVaultPath();
+  console.error(`Unknown target "${targetName}". Configured targets: ${targetNames(config).join(', ')}`);
+  console.error('Add it first: node backup.js add-target <name> <local-path> <remote-folder>');
+  process.exit(1);
+}
+
+function remoteFolder(targetName = 'default') {
+  const config = loadConfig();
+  let raw;
+  if (targetName === 'default' && process.env.PROTON_BACKUP_FOLDER) {
+    raw = process.env.PROTON_BACKUP_FOLDER;
+  } else {
+    const target = resolveTarget(config, targetName);
+    if (target && target.remoteFolder) {
+      raw = target.remoteFolder;
+    } else if (targetName === 'default') {
+      raw = defaultRemoteFolder();
+    } else {
+      console.error(`Unknown target "${targetName}". Configured targets: ${targetNames(config).join(', ')}`);
+      console.error('Add it first: node backup.js add-target <name> <local-path> <remote-folder>');
+      process.exit(1);
+    }
+  }
   return normalizeRemoteFolder(raw);
+}
+
+/**
+ * Registers a second (or third, ...) independent local<->remote pair under
+ * the same Proton login. No new auth: the CLI's cached session already
+ * covers the whole account, targets only decide which local folder syncs to
+ * which remote folder. Migrates a pre-targets flat config into
+ * targets.default in the same write, so the config converges to one shape.
+ */
+function cmdAddTarget(name, localPath, remoteFolderArg) {
+  if (!name || !localPath || !remoteFolderArg) {
+    console.error('Usage: node backup.js add-target <name> <local-path> <remote-folder>');
+    process.exit(1);
+  }
+  if (name === 'default') {
+    console.error('"default" already exists implicitly. Choose a different target name.');
+    process.exit(1);
+  }
+  const config = loadConfig();
+  if (!config.targets) {
+    config.targets = {
+      default: { vaultPath: config.vaultPath || defaultVaultPath(), remoteFolder: config.remoteFolder || defaultRemoteFolder() },
+    };
+    delete config.vaultPath;
+    delete config.remoteFolder;
+  }
+  const folder = normalizeRemoteFolder(remoteFolderArg);
+  config.targets[name] = { vaultPath: localPath, remoteFolder: folder };
+  saveConfig(config);
+  console.log(`Added target "${name}": ${localPath} <-> ${folder}`);
+  console.log(`Use it with --target ${name} on any command, e.g. "node backup.js sync --target ${name}".`);
+}
+
+function cmdTargets() {
+  const config = loadConfig();
+  for (const name of targetNames(config)) {
+    const t = resolveTarget(config, name);
+    console.log(`${name}: ${t.vaultPath || defaultVaultPath()} <-> ${normalizeRemoteFolder(t.remoteFolder || defaultRemoteFolder())}`);
+  }
+}
+
+/** Pulls a trailing `--target <name>` out of argv wherever it appears. */
+function extractTarget(args) {
+  const idx = args.indexOf('--target');
+  if (idx === -1) return { target: 'default', rest: args };
+  const target = args[idx + 1];
+  if (!target) {
+    console.error('--target requires a name, e.g. --target assets');
+    process.exit(1);
+  }
+  return { target, rest: [...args.slice(0, idx), ...args.slice(idx + 2)] };
 }
 
 /** Resolution order: explicit env override > a binary this tool installed itself > PATH. */
@@ -350,9 +442,9 @@ async function cmdSetup() {
  * to re-run setup." A missing/unreachable folder is deliberately treated as
  * success, not failure — only an auth-shaped error sets a non-zero exit.
  */
-async function cmdCheck() {
+async function cmdCheck(targetName = 'default') {
   await ensureBinary();
-  const folder = remoteFolder();
+  const folder = remoteFolder(targetName);
   const result = listPath(folder);
   if (result.ok) {
     console.log(`Session OK. "${folder}" is reachable.`);
@@ -394,14 +486,14 @@ function ensureRemoteFolder(folder) {
 
 function cmdMove(filePath, opts = {}) {
   if (!filePath) {
-    console.error('Usage: node backup.js move <file> [--copy]');
+    console.error('Usage: node backup.js move <file> [--copy] [--target <name>]');
     process.exit(1);
   }
   if (!fs.existsSync(filePath)) {
     console.error(`No such file: ${filePath}`);
     process.exit(1);
   }
-  const vault = vaultPath();
+  const vault = vaultPath(opts.target || 'default');
   ensureVault(vault);
   const dest = path.join(vault, path.basename(filePath));
   if (opts.copy) {
@@ -425,11 +517,11 @@ function cmdMove(filePath, opts = {}) {
  * rounds). Enumerating and transferring each top-level item individually
  * avoids ever re-wrapping a folder in a copy of its own name.
  */
-async function cmdSync() {
+async function cmdSync(targetName = 'default') {
   await ensureBinary();
-  const vault = vaultPath();
+  const vault = vaultPath(targetName);
   ensureVault(vault);
-  const folder = remoteFolder();
+  const folder = remoteFolder(targetName);
 
   const entries = fs.readdirSync(vault).filter((name) => name !== 'config.json' && !name.startsWith('.'));
   if (entries.length === 0) {
@@ -454,11 +546,11 @@ async function cmdSync() {
   console.log('Note: sync only uploads. Removing a file from the vault does not delete it remotely.');
 }
 
-async function cmdPull() {
+async function cmdPull(targetName = 'default') {
   await ensureBinary();
-  const vault = vaultPath();
+  const vault = vaultPath(targetName);
   ensureVault(vault);
-  const folder = remoteFolder();
+  const folder = remoteFolder(targetName);
 
   const precheck = listPath(folder);
   if (!precheck.ok) {
@@ -505,22 +597,22 @@ async function cmdPull() {
   console.log('upload-only guarantee, neither command can ever wipe out the other side.');
 }
 
-async function cmdAdd(filePath) {
-  cmdMove(filePath, { copy: false });
-  await cmdSync();
+async function cmdAdd(filePath, targetName = 'default') {
+  cmdMove(filePath, { copy: false, target: targetName });
+  await cmdSync(targetName);
 }
 
-async function cmdBoth() {
+async function cmdBoth(targetName = 'default') {
   console.log('Running both: pulling remote first, then syncing local up...\n');
-  await cmdPull();
+  await cmdPull(targetName);
   console.log('');
-  await cmdSync();
+  await cmdSync(targetName);
   console.log('\nBoth complete. Local vault and remote folder now hold the union of both sides.');
 }
 
-async function cmdList() {
+async function cmdList(targetName = 'default') {
   await ensureBinary();
-  const folder = remoteFolder();
+  const folder = remoteFolder(targetName);
   const result = listPath(folder);
   if (!result.ok) {
     if (result.authFailure) {
@@ -534,13 +626,13 @@ async function cmdList() {
   console.log(result.stdout.trim() || '(empty)');
 }
 
-async function cmdGet(name, destDir) {
+async function cmdGet(name, destDir, targetName = 'default') {
   if (!name) {
-    console.error('Usage: node backup.js get <remote-file-name> [local-dest-dir]');
+    console.error('Usage: node backup.js get <remote-file-name> [local-dest-dir] [--target <name>]');
     process.exit(1);
   }
   await ensureBinary();
-  const folder = remoteFolder();
+  const folder = remoteFolder(targetName);
   const dest = destDir || '.';
   fs.mkdirSync(dest, { recursive: true });
   const remotePath = `${folder}/${name}`;
@@ -575,6 +667,16 @@ Usage:
   node backup.js add <path>         Shorthand: move + sync in one step
   node backup.js list               List what is in your remote backup folder
   node backup.js get <name> [dest]  Download a file back down
+  node backup.js add-target <name> <local-path> <remote-folder>
+                                     Register a second (or third, ...) independent
+                                     local<->remote pair under the same login
+  node backup.js targets            List configured targets and their paths
+
+Every command above except "setup" and "add-target"/"targets" accepts
+"--target <name>" to operate on a target other than the default vault, e.g.
+"node backup.js sync --target assets". No new login is needed for a second
+target — one Proton session covers the whole account; targets just decide
+which local folder syncs to which remote folder.
 
 "sync" (a.k.a. push) and "pull" are separate one-way directions: sync never
 deletes remotely, pull never deletes locally, so running them in either order
@@ -586,34 +688,44 @@ Not a versioned backup tool. See README.md for what this is and is not.`);
 }
 
 async function main() {
-  const [, , cmd, ...rest] = process.argv;
+  const [, , cmd, ...rawRest] = process.argv;
+  // add-target's own positional args can't collide with --target parsing.
+  if (cmd === 'add-target') {
+    cmdAddTarget(rawRest[0], rawRest[1], rawRest[2]);
+    return;
+  }
+  if (cmd === 'targets') {
+    cmdTargets();
+    return;
+  }
+  const { target, rest } = extractTarget(rawRest);
   switch (cmd) {
     case 'setup':
       await cmdSetup();
       break;
     case 'check':
-      await cmdCheck();
+      await cmdCheck(target);
       break;
     case 'move':
-      cmdMove(rest.find((a) => a !== '--copy'), { copy: rest.includes('--copy') });
+      cmdMove(rest.find((a) => a !== '--copy'), { copy: rest.includes('--copy'), target });
       break;
     case 'sync':
-      await cmdSync();
+      await cmdSync(target);
       break;
     case 'pull':
-      await cmdPull();
+      await cmdPull(target);
       break;
     case 'both':
-      await cmdBoth();
+      await cmdBoth(target);
       break;
     case 'add':
-      await cmdAdd(rest[0]);
+      await cmdAdd(rest[0], target);
       break;
     case 'list':
-      await cmdList();
+      await cmdList(target);
       break;
     case 'get':
-      await cmdGet(rest[0], rest[1]);
+      await cmdGet(rest[0], rest[1], target);
       break;
     default:
       printHelp();
