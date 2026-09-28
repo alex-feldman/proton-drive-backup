@@ -327,6 +327,14 @@ touch, share, or depend on anyone else's data, bucket, or account.
   `proton-drive --help` — the syntax may have moved on since this was
   written. Please open an issue or send a fix.
 
+## Versioning
+
+Follows [Semantic Versioning](https://semver.org/) starting at `1.1.0`
+(2026-09-28); see `CHANGELOG.md` for what changed in each release. Releases
+are tagged in git (`git tag`); there's no npm registry publish, so a specific
+version means a specific tag/commit to check out, not a version to `npm
+install`.
+
 ## License
 
 MIT — see `LICENSE`.
