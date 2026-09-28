@@ -350,6 +350,28 @@ function ensureVault(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+/**
+ * A `.vaultignore` at the root of a target's vault folder excludes named
+ * top-level entries from `sync`, the same idea as `.gitignore` but far
+ * smaller in scope: one basename per line, no wildcards, no negation, no
+ * subdirectory patterns. It only ever matches a TOP-LEVEL entry of the vault
+ * folder itself, never something nested inside a subfolder, because the
+ * underlying `filesystem upload` call uploads a folder's contents
+ * recursively with no per-file exclude of its own, so excluding something
+ * nested would mean walking and uploading the whole tree file-by-file
+ * instead of handing whole folders to the CLI, which is a bigger change than
+ * this need justifies today. Comments (`#` at the start of a line, after
+ * trimming) and blank lines are skipped.
+ */
+function loadVaultIgnore(vaultDir) {
+  const file = path.join(vaultDir, '.vaultignore');
+  if (!fs.existsSync(file)) return new Set();
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'));
+  return new Set(lines);
+}
+
 async function ensureProtonAccount() {
   const has = await ask('Do you already have a Proton account (proton.me)? [y/N]: ');
   if (/^y/i.test(has.trim())) return;
@@ -523,9 +545,14 @@ async function cmdSync(targetName = 'default') {
   ensureVault(vault);
   const folder = remoteFolder(targetName);
 
-  const entries = fs.readdirSync(vault).filter((name) => name !== 'config.json' && !name.startsWith('.'));
+  const ignore = loadVaultIgnore(vault);
+  const entries = fs.readdirSync(vault).filter((name) => name !== 'config.json' && !name.startsWith('.') && !ignore.has(name));
+  if (ignore.size) {
+    const skipped = fs.readdirSync(vault).filter((name) => ignore.has(name));
+    if (skipped.length) console.log(`Excluding ${skipped.length} item(s) per .vaultignore: ${skipped.join(', ')}`);
+  }
   if (entries.length === 0) {
-    console.log(`Vault at ${vault} is empty — nothing to sync.`);
+    console.log(`Vault at ${vault} is empty (or everything in it is excluded), nothing to sync.`);
     return;
   }
 

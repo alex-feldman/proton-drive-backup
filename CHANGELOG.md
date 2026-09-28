@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-09-28
+
+### Added
+
+- `.vaultignore`: drop this file at the root of any target's local folder to
+  exclude named top-level entries from `sync`, one basename per line. No
+  wildcards, no negation, top-level only (see README, "Multiple targets").
+
 ## [1.1.0] - 2026-09-28
 
 ### Added

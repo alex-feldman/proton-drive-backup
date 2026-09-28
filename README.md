@@ -215,6 +215,24 @@ Each target is fully independent: `sync --target a` never touches target
 `b`'s local or remote folder. The first (originally `setup`-created) target
 is always named `default` and needs no `--target` flag.
 
+**Excluding a top-level folder from a target: `.vaultignore`.** Drop a file
+named `.vaultignore` at the root of a target's local folder, one entry per
+line (blank lines and `#` comments ignored), and `sync` skips any top-level
+entry whose name matches:
+
+```text
+# .vaultignore, at the root of the folder you're syncing
+some-large-third-party-dataset
+```
+
+This is intentionally small: no wildcards, no negation, and it only matches
+**top-level** entries of that folder, never something nested inside a
+subfolder (the underlying Proton CLI uploads a folder's contents recursively
+with no per-file exclude, so excluding something nested would mean walking
+and uploading the whole tree file-by-file instead of handing whole folders to
+it, a much bigger change). If you need more than "skip this whole top-level
+folder," this isn't that tool.
+
 **A caveat if you're on Windows and running these commands from Git Bash (or
 any MSYS2 shell):** the shell rewrites a leading `/` in a command argument
 into a Windows path before `node` ever sees it, so
