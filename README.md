@@ -188,6 +188,18 @@ before syncing, whichever machine runs `sync` last wins (file conflicts
 always replace) — there's no merge-both-versions option for files, only
 for folders.
 
+**Converting an existing target from per-machine to shared later needs no
+code change**, whether it's the original `default` target or one you added
+afterward with `add-target`. A target's remote folder is just a config
+value (`config.json`, `targets.<name>.remoteFolder`). Point every machine's
+same-named target at the identical literal path instead of each having its
+own (e.g. `/my-files/naro-data-shared` instead of
+`/my-files/backups/<hostname>/naro-data`), and they converge from then on.
+The one-time catch: whatever already exists under each machine's old
+per-machine path does not move itself. Run `pull` then `sync` (or `both`)
+against the new shared path once, on each machine, to reconcile the
+existing content into it by hand.
+
 ## Multiple targets (advanced)
 
 By default there's one local<->remote pair: the vault folder from `setup`,
