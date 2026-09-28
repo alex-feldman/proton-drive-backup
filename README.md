@@ -233,6 +233,22 @@ and uploading the whole tree file-by-file instead of handing whole folders to
 it, a much bigger change). If you need more than "skip this whole top-level
 folder," this isn't that tool.
 
+**Orphan detection: `check` and `sync` warn you about drift, automatically.**
+Since `sync` never deletes anything remotely (see "How it works" above), a
+file you delete locally silently persists forever on Proton Drive unless you
+remove it yourself. This tool won't fix that for you, but it will tell you:
+
+- `check` compares the remote folder's top-level names against the local
+  folder and prints a note if anything exists remotely with no local
+  counterpart. This is the common case: something you deleted locally a
+  while ago, still sitting on Proton Drive.
+- `sync` re-checks right after uploading and warns if anything is still
+  local-only, which at that point means it failed to upload, not that it
+  simply hasn't synced yet.
+
+Both are advisory only: they never change the exit code and never touch
+either side. Top-level only, like `.vaultignore` above, for the same reason.
+
 **A caveat if you're on Windows and running these commands from Git Bash (or
 any MSYS2 shell):** the shell rewrites a leading `/` in a command argument
 into a Windows path before `node` ever sees it, so

@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-09-28
+
+### Added
+
+- Orphan detection, advisory only (never changes the exit code, never touches
+  either side): `check` warns about top-level remote entries with no local
+  counterpart (drift from a local delete, since `sync` never deletes
+  remotely); `sync` warns if anything is still local-only right after
+  uploading, which at that point means a failed upload.
+
 ## [1.2.0] - 2026-09-28
 
 ### Added

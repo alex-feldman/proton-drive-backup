@@ -372,6 +372,53 @@ function loadVaultIgnore(vaultDir) {
   return new Set(lines);
 }
 
+/** Top-level local entries a sync would consider (mirrors cmdSync's own filter). */
+function localTopLevelNames(vaultDir) {
+  if (!fs.existsSync(vaultDir)) return [];
+  const ignore = loadVaultIgnore(vaultDir);
+  return fs.readdirSync(vaultDir).filter((name) => name !== 'config.json' && !name.startsWith('.') && !ignore.has(name));
+}
+
+/** Top-level remote entries, or null if the folder isn't listable (never fatal). */
+function remoteTopLevelNames(folder) {
+  const result = listPath(folder);
+  if (!result.ok) return null;
+  try {
+    return JSON.parse(result.stdout).map((item) => item.name && item.name.value).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Orphan reporting is advisory only: it never changes the exit code and
+ * never touches either side, since `sync` is deliberately upload-only and
+ * a deleted local file is expected to linger remotely (README, "How it
+ * works"). This just makes that silent drift visible instead of invisible.
+ * Top-level only, matching every other name-based operation in this file
+ * (`.vaultignore`, the item-by-item transfer strategy).
+ */
+function reportRemoteOnlyOrphans(vaultDir, folder) {
+  const remoteNames = remoteTopLevelNames(folder);
+  if (remoteNames === null) return; // folder unreachable or unparsable, say nothing
+  const localSet = new Set(localTopLevelNames(vaultDir));
+  const orphans = remoteNames.filter((name) => !localSet.has(name));
+  if (orphans.length) {
+    console.log(`Note: ${orphans.length} item(s) exist on the remote but not in the local vault (deleted locally since the last sync? sync never deletes remotely, so this can persist indefinitely): ${orphans.join(', ')}`);
+  }
+}
+
+/** Anything still local-only right after a sync means that item failed to upload. */
+function reportLocalOnlyAfterSync(vaultDir, folder) {
+  const remoteNames = remoteTopLevelNames(folder);
+  if (remoteNames === null) return;
+  const remoteSet = new Set(remoteNames);
+  const stillLocal = localTopLevelNames(vaultDir).filter((name) => !remoteSet.has(name));
+  if (stillLocal.length) {
+    console.log(`WARNING: ${stillLocal.length} item(s) are still local-only right after a sync, meaning they likely failed to upload: ${stillLocal.join(', ')}`);
+  }
+}
+
 async function ensureProtonAccount() {
   const has = await ask('Do you already have a Proton account (proton.me)? [y/N]: ');
   if (/^y/i.test(has.trim())) return;
@@ -466,10 +513,12 @@ async function cmdSetup() {
  */
 async function cmdCheck(targetName = 'default') {
   await ensureBinary();
+  const vault = vaultPath(targetName);
   const folder = remoteFolder(targetName);
   const result = listPath(folder);
   if (result.ok) {
     console.log(`Session OK. "${folder}" is reachable.`);
+    reportRemoteOnlyOrphans(vault, folder);
     return;
   }
   if (result.authFailure) {
@@ -478,7 +527,7 @@ async function cmdCheck(targetName = 'default') {
     return;
   }
   console.log(`"${folder}" was not reachable, but that's expected if it doesn't exist yet`);
-  console.log('(it gets created automatically on first sync) — not treated as a failure.');
+  console.log("(it gets created automatically on first sync), not treated as a failure.");
 }
 
 /**
@@ -546,7 +595,7 @@ async function cmdSync(targetName = 'default') {
   const folder = remoteFolder(targetName);
 
   const ignore = loadVaultIgnore(vault);
-  const entries = fs.readdirSync(vault).filter((name) => name !== 'config.json' && !name.startsWith('.') && !ignore.has(name));
+  const entries = localTopLevelNames(vault);
   if (ignore.size) {
     const skipped = fs.readdirSync(vault).filter((name) => ignore.has(name));
     if (skipped.length) console.log(`Excluding ${skipped.length} item(s) per .vaultignore: ${skipped.join(', ')}`);
@@ -565,12 +614,13 @@ async function cmdSync(targetName = 'default') {
     if (result.authFailure) {
       printAuthHelp();
     } else {
-      console.error('Sync failed. If this keeps happening, check "proton-drive --help" — the CLI\'s command syntax may have changed since this tool was written.');
+      console.error('Sync failed. If this keeps happening, check "proton-drive --help", the CLI\'s command syntax may have changed since this tool was written.');
     }
     process.exit(1);
   }
   console.log(`\nSync complete. Confirm it in your browser at https://drive.proton.me`);
   console.log('Note: sync only uploads. Removing a file from the vault does not delete it remotely.');
+  reportLocalOnlyAfterSync(vault, folder);
 }
 
 async function cmdPull(targetName = 'default') {
