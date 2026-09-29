@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- `usage [--target <name>]` walks a configured remote target and reports
+  active-revision file bytes, counts, and the ten largest current files.
+  It explicitly excludes account quota, prior versions, Trash, and other
+  Drive content from its claim.
+
 ## [1.3.0] - 2026-09-28
 
 ### Added

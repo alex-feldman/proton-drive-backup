@@ -308,6 +308,10 @@ node backup.js add /path/to/some-file.pdf
 # List what's currently in your remote backup folder
 node backup.js list
 
+# Report current remote file size, recursively, for one configured target
+node backup.js usage
+node backup.js usage --target assets
+
 # Download something back down (to prove it's really there and restorable)
 node backup.js get some-file.pdf ./restored/
 
@@ -325,6 +329,14 @@ node backup.js check
 After a sync, open [drive.proton.me](https://drive.proton.me) in your browser
 and confirm the files show up in your backup folder — that's the real proof
 it worked, not just the command exiting cleanly.
+
+`usage` walks the selected target's remote folders and reports the total size
+of active file revisions, file and folder counts, and the ten largest current
+files. It reads only Proton Drive and works with any configured target. Its
+total is **not** account quota or full account usage: older versions, Trash,
+and content outside the selected target may use additional storage. Run it
+once per target to compare configured vaults. Do not sum target totals if
+their remote folders overlap, since files in a nested target appear in both.
 
 ## When your session expires
 

@@ -703,6 +703,79 @@ async function cmdList(targetName = 'default') {
   console.log(result.stdout.trim() || '(empty)');
 }
 
+function listItemsForUsage(folder) {
+  const result = listPath(folder);
+  if (!result.ok) {
+    if (result.authFailure) printAuthHelp();
+    throw new Error(`Could not list ${folder}: ${result.stderr.trim() || `CLI exit ${result.status}`}`);
+  }
+  let items;
+  try {
+    items = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`Could not parse the item list for ${folder}; the CLI's JSON output may have changed.`);
+  }
+  if (!Array.isArray(items)) throw new Error(`Expected a JSON array when listing ${folder}.`);
+  return items;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes;
+  let index = -1;
+  do { value /= 1024; index++; } while (value >= 1024 && index < units.length - 1);
+  return `${value.toFixed(1)} ${units[index]}`;
+}
+
+async function cmdUsage(targetName = 'default') {
+  await ensureBinary();
+  const root = remoteFolder(targetName);
+  const pending = [{ remote: root, relative: '' }];
+  const largest = [];
+  let folders = 0;
+  let files = 0;
+  let bytes = 0;
+  let unknownSize = 0;
+  let otherItems = 0;
+
+  while (pending.length) {
+    const current = pending.pop();
+    const items = listItemsForUsage(current.remote);
+    for (const item of items) {
+      const name = item.name && item.name.ok && item.name.value;
+      if (typeof name !== 'string') throw new Error(`An item in ${current.remote} has no readable name.`);
+      const relative = current.relative ? `${current.relative}/${name}` : name;
+      if (item.type === 'folder') {
+        folders++;
+        // The CLI uses / as a path separator, even inside an item name.
+        pending.push({ remote: `${current.remote}/${name.replace(/\//g, '\\/')}`, relative });
+      } else if (item.type === 'file') {
+        files++;
+        const size = item.activeRevision && item.activeRevision.storageSize;
+        if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) {
+          unknownSize++;
+          continue;
+        }
+        bytes += size;
+        largest.push({ relative, size });
+      } else {
+        otherItems++;
+      }
+    }
+  }
+
+  largest.sort((a, b) => b.size - a.size);
+  console.log(`${targetName}: ${formatBytes(bytes)} (${bytes} bytes) in ${files} current file(s), ${folders} folder(s)`);
+  if (unknownSize) console.log(`${unknownSize} file(s) had no active revision size and are excluded from the total.`);
+  if (otherItems) console.log(`${otherItems} non-file item(s) are excluded from the total.`);
+  if (largest.length) {
+    console.log('Largest current files:');
+    for (const file of largest.slice(0, 10)) console.log(`  ${formatBytes(file.size).padStart(10)}  ${file.relative}`);
+  }
+  console.log('Current remote files only. This is not account quota or total usage; versions, Trash, and other Drive content may add storage.');
+}
+
 async function cmdGet(name, destDir, targetName = 'default') {
   if (!name) {
     console.error('Usage: node backup.js get <remote-file-name> [local-dest-dir] [--target <name>]');
@@ -743,6 +816,7 @@ Usage:
   node backup.js both               Pull, then sync: make both sides hold everything
   node backup.js add <path>         Shorthand: move + sync in one step
   node backup.js list               List what is in your remote backup folder
+  node backup.js usage              Total current remote files and show the largest
   node backup.js get <name> [dest]  Download a file back down
   node backup.js add-target <name> <local-path> <remote-folder>
                                      Register a second (or third, ...) independent
@@ -801,6 +875,9 @@ async function main() {
     case 'list':
       await cmdList(target);
       break;
+    case 'usage':
+      await cmdUsage(target);
+      break;
     case 'get':
       await cmdGet(rest[0], rest[1], target);
       break;
@@ -810,4 +887,7 @@ async function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  console.error(err.message);
+  process.exitCode = 1;
+});
