@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-09-29
+
+### Changed
+
+- New per-machine and shared setups put the default vault in a dedicated
+  `/vault` folder beneath the backup grouping folder. Existing configured
+  destinations remain unchanged.
+- `add-target` and repeat `setup` refuse a remote folder that overlaps another
+  configured target. Repeat setup now reads and writes `targets.default` when
+  multiple targets are configured, preserving the actual saved destination.
+
 ## [1.4.0] - 2026-09-29
 
 ### Added

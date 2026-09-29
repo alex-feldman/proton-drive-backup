@@ -42,9 +42,9 @@ function defaultVaultPath() {
   return path.join(os.homedir(), 'Documents', 'proton-vault');
 }
 
-function defaultRemoteFolder() {
-  const hostname = os.hostname().replace(/[^a-zA-Z0-9._-]/g, '-');
-  return `/backups/${hostname}`;
+function defaultRemoteFolder(shared = false) {
+  const owner = shared ? 'shared' : os.hostname().replace(/[^a-zA-Z0-9._-]/g, '-');
+  return `/backups/${owner}/vault`;
 }
 
 // CLI 0.6.0's root namespace is "/my-files" — a bare "/backups/..." path is
@@ -85,6 +85,19 @@ function resolveTarget(config, name) {
 function targetNames(config) {
   if (config.targets) return Object.keys(config.targets);
   return ['default'];
+}
+
+function overlappingTarget(config, candidate, exceptName = null) {
+  const folder = normalizeRemoteFolder(candidate);
+  for (const name of targetNames(config)) {
+    if (name === exceptName) continue;
+    const target = resolveTarget(config, name);
+    const existing = normalizeRemoteFolder((target && target.remoteFolder) || defaultRemoteFolder());
+    if (folder === existing || folder.startsWith(`${existing}/`) || existing.startsWith(`${folder}/`)) {
+      return { name, folder: existing };
+    }
+  }
+  return null;
 }
 
 function vaultPath(targetName = 'default') {
@@ -143,6 +156,16 @@ function cmdAddTarget(name, localPath, remoteFolderArg) {
     delete config.remoteFolder;
   }
   const folder = normalizeRemoteFolder(remoteFolderArg);
+  if (config.targets[name]) {
+    console.error(`Target "${name}" is already configured. Choose a new name.`);
+    process.exit(1);
+  }
+  const overlap = overlappingTarget(config, folder);
+  if (overlap) {
+    console.error(`Remote folder "${folder}" overlaps target "${overlap.name}" at "${overlap.folder}".`);
+    console.error('Choose a separate sibling folder so the targets stay independent. Nothing was saved.');
+    process.exit(1);
+  }
   config.targets[name] = { vaultPath: localPath, remoteFolder: folder };
   saveConfig(config);
   console.log(`Added target "${name}": ${localPath} <-> ${folder}`);
@@ -447,10 +470,10 @@ async function cmdSetup() {
 
   const config = loadConfig();
 
-  const currentVault = config.vaultPath || defaultVaultPath();
+  const savedDefault = resolveTarget(config, 'default') || {};
+  const currentVault = savedDefault.vaultPath || defaultVaultPath();
   const chosenVault = await ask(`Local vault folder [${currentVault}]: `);
   const vault = chosenVault || currentVault;
-  config.vaultPath = vault;
 
   const modeAnswer = await ask(
     'Is this vault specific to this machine, or a shared vault you will connect ' +
@@ -458,7 +481,7 @@ async function cmdSetup() {
   );
   const shared = /^shared/i.test(modeAnswer.trim());
   const remoteDefault = normalizeRemoteFolder(
-    config.remoteFolder || (shared ? '/backups/shared' : defaultRemoteFolder())
+    savedDefault.remoteFolder || defaultRemoteFolder(shared)
   );
   if (shared) {
     console.log('\nShared mode: use this exact same remote folder name on every machine');
@@ -467,7 +490,21 @@ async function cmdSetup() {
 
   const chosenFolder = await ask(`Remote backup folder [${remoteDefault}]: `);
   const folder = normalizeRemoteFolder(chosenFolder || remoteDefault);
-  config.remoteFolder = folder;
+
+  const overlap = overlappingTarget(config, folder, 'default');
+  if (overlap) {
+    closeReadline();
+    console.error(`Remote folder "${folder}" overlaps target "${overlap.name}" at "${overlap.folder}".`);
+    console.error('Choose a separate sibling folder. Nothing was saved.');
+    process.exitCode = 1;
+    return;
+  }
+
+  if (config.targets) config.targets.default = { vaultPath: vault, remoteFolder: folder };
+  else {
+    config.vaultPath = vault;
+    config.remoteFolder = folder;
+  }
 
   closeReadline(); // release stdin cleanly before spawning `proton-drive auth login` with inherited stdio
 
@@ -887,7 +924,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err.message);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { defaultRemoteFolder, normalizeRemoteFolder, overlappingTarget, resolveTarget };

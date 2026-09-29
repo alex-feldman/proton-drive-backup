@@ -127,8 +127,8 @@ node backup.js setup
    [shared vault](#shared-vaults-across-multiple-computers-advanced) you'll
    connect from more than one computer.
 5. Ask which remote Proton Drive folder to sync it to (default
-   `/my-files/backups/<your-hostname>` for per-machine,
-   `/my-files/backups/shared` for shared). Proton Drive's root namespace is
+   `/my-files/backups/<your-hostname>/vault` for per-machine,
+   `/my-files/backups/shared/vault` for shared). Proton Drive's root namespace is
    `/my-files` — if you type a folder without that prefix, it's added for
    you automatically.
 6. Run `proton-drive auth login`, which opens your browser. Finish the Proton
@@ -145,11 +145,11 @@ log in again until that session eventually expires.
 ## Shared vaults across multiple computers (advanced)
 
 By default, every machine gets its own remote folder
-(`/my-files/backups/<hostname>`) — completely independent backups, nothing
+(`/my-files/backups/<hostname>/vault`) — completely independent backups, nothing
 expected to appear on a second computer. If you want one vault visible from
 multiple machines instead, choose "shared" when `setup` asks, and **use the
 exact same remote folder name on every machine** you connect (the default
-`/my-files/backups/shared` is fine, or pick your own).
+`/my-files/backups/shared/vault` is fine, or pick your own).
 
 This tool does not do two-way sync. `sync` only uploads; it is a one-way
 push from your local vault to the remote folder, and it never deletes
@@ -226,6 +226,14 @@ node backup.js pull --target <name>
 Each target is fully independent: `sync --target a` never touches target
 `b`'s local or remote folder. The first (originally `setup`-created) target
 is always named `default` and needs no `--target` flag.
+
+Choose a separate remote folder for every target, such as
+`/my-files/backups/<hostname>/photos` beside the default `vault` folder.
+`add-target` rejects a path equal to, inside, or containing an existing
+target's remote folder. Repeat `setup` applies the same check if you change
+the default path. Existing saved destinations are preserved when you update
+the tool; it never moves remote files or silently switches an older install
+to the new `/vault` default.
 
 **Excluding a top-level folder from a target: `.vaultignore`.** Drop a file
 named `.vaultignore` at the root of a target's local folder, one entry per
