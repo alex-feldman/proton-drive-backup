@@ -4,6 +4,21 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `pull` and `get` work with Proton Drive CLI `0.9.0`, which renamed the
+  download file-conflict value `replace` to `remove` and rejects the old one.
+  Uploads still pass `replace`. Covered by `test/download.test.js`.
+
+### Documentation
+
+- README: where CLI `0.9.0` keeps the login (`PROTON_DRIVE_CREDENTIALS_STORE`:
+  `keychain`, `unsafe_file`, `pass`), and why a Windows command run over SSH
+  with key authentication reports an expired session (it cannot read
+  Credential Manager; run it in the desktop session instead).
+
 ## [1.5.0] - 2026-09-29
 
 ### Changed

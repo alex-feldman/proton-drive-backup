@@ -172,9 +172,11 @@ vault and then running `pull` followed by `sync` just re-establishes both
 copies, it can't erase anything.
 
 Both `sync` and `pull` transfer the *contents* of the vault/remote folder
-item by item, never the folder itself, and pass `-d merge -f replace` to the
-underlying CLI so folders merge instead of colliding and files resolve in
-favor of whichever side is actively running the command. (An earlier version
+item by item, never the folder itself, and pass `-d merge` plus a file
+conflict strategy to the underlying CLI (`-f replace` on upload, `-f remove`
+on download, which is what CLI `0.9.0` calls the same thing) so folders merge
+instead of colliding and files resolve in favor of whichever side is actively
+running the command. (An earlier version
 transferred the whole folder in one call, which nested one more level of
 "vault name" or "remote folder name" every time you alternated `pull` and
 `sync` — compounding indefinitely with repeated use. Fixed 2026-07-28,
@@ -359,6 +361,21 @@ Then try your command again.
 That's it — there's no separate "refresh" step. Re-run `setup`, finish the
 browser login again, and continue.
 
+### Where the login is kept, and running over SSH
+
+CLI `0.9.0` reads `PROTON_DRIVE_CREDENTIALS_STORE` to choose where it keeps
+the session: `keychain` (the default: Windows Credential Manager, macOS
+Keychain, the Linux Secret Service), `unsafe_file` (a plain file, readable by
+anyone with your account), or `pass`. This tool passes your environment
+through unchanged, so set it the same way for every command.
+
+**On Windows, a command run over SSH with key authentication cannot read
+Credential Manager**, so `check`, `sync` and `pull` report an expired session
+even though the login is fine. Run the command inside your signed-in desktop
+session instead, for example as a one-off scheduled task with logon type
+Interactive, which runs while you are signed in (a locked screen is fine).
+Do not re-run `setup` for this: the login is not expired.
+
 ## Why a separate repo
 
 This is deliberately small and self-contained so it's easy to hand to a
@@ -388,7 +405,10 @@ touch, share, or depend on anyone else's data, bucket, or account.
   auto-create logic, are verified against CLI `0.6.0` live on a real
   authenticated account (2026-07-28), and re-verified against `0.7.0`
   (2026-08-01: fresh-clone auto-install, `check`, `sync`, `list`, `get`,
-  and remote folder auto-create all pass); if a command starts failing with
+  and remote folder auto-create all pass). CLI `0.9.0` (2026-11) renamed the
+  download file-conflict value `replace` to `remove`, which broke `pull` and
+  `get` until this tool followed it; upload still takes `replace`. If a
+  command starts failing with
   something that looks like a usage error rather than an auth error, check
   `proton-drive --help` — the syntax may have moved on since this was
   written. Please open an issue or send a fix.

@@ -62,6 +62,14 @@ function normalizeRemoteFolder(folder) {
 }
 
 /** Shared primitive: does `path` exist and list cleanly? */
+/**
+ * The file-conflict strategy for downloads (`pull`, `get`): the remote copy wins over a local file
+ * of the same name. Proton Drive CLI 0.9.0 calls this `remove` ("delete the local file or folder and
+ * download the remote copy"); earlier versions called it `replace`, which 0.9.0 rejects for
+ * downloads. Uploads still take `replace`.
+ */
+const DOWNLOAD_FILE_STRATEGY = 'remove';
+
 function listPath(remotePath) {
   return runProton(['filesystem', 'list', remotePath, '--json']);
 }
@@ -696,7 +704,7 @@ async function cmdPull(targetName = 'default') {
   // isn't misread as a path separator.
   const remotePaths = children.map((name) => `${folder}/${name.replace(/\//g, '\\/')}`);
   console.log(`Downloading ${children.length} item(s) from ${folder} -> ${vault} ...`);
-  const result = runProton(['filesystem', 'download', ...remotePaths, vault, '-d', 'merge', '-f', 'replace'], { inherit: true });
+  const result = runProton(['filesystem', 'download', ...remotePaths, vault, '-d', 'merge', '-f', DOWNLOAD_FILE_STRATEGY], { inherit: true });
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
@@ -823,7 +831,7 @@ async function cmdGet(name, destDir, targetName = 'default') {
   const dest = destDir || '.';
   fs.mkdirSync(dest, { recursive: true });
   const remotePath = `${folder}/${name}`;
-  const result = runProton(['filesystem', 'download', remotePath, dest, '-d', 'merge', '-f', 'replace'], { inherit: true });
+  const result = runProton(['filesystem', 'download', remotePath, dest, '-d', 'merge', '-f', DOWNLOAD_FILE_STRATEGY], { inherit: true });
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
@@ -931,4 +939,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { defaultRemoteFolder, normalizeRemoteFolder, overlappingTarget, resolveTarget };
+module.exports = { defaultRemoteFolder, normalizeRemoteFolder, overlappingTarget, resolveTarget, DOWNLOAD_FILE_STRATEGY };
