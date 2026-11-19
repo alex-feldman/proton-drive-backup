@@ -6,6 +6,33 @@ follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
 
 ## [Unreleased]
 
+### Added
+
+- `set-target <name> --keep-versions on|off` lets a target keep the old remote
+  copy of a changed file as a version of the same file (`sync` uploads with
+  `-f create-new-revision`) instead of replacing it. Off by default, so
+  existing setups behave exactly as before. It is a per-target setting
+  (`keepVersions: true`, or at the top level of an older single-folder config),
+  shown by `targets`. There is still no restore command; old versions are
+  recovered from a file's version history in Proton Drive on the web. Covered
+  by `test/upload-versions.test.js`.
+- `setup --cli-version x.y.z|latest` (or `PROTON_DRIVE_CLI_VERSION`) installs a
+  specific Proton Drive CLI version, or the newest one, on request.
+
+### Changed
+
+- `setup` and the automatic install now install the pinned, tested Proton Drive
+  CLI version (`0.9.0`) instead of whatever Proton lists as newest. CLI `0.9.0`
+  renamed a flag value between minor releases and broke `pull`, so a newer
+  version is now an explicit choice. Already installed CLIs are untouched.
+  The old `0.6.0` fallback is gone. Covered by `test/cli-version.test.js`.
+- A config that has a `targets` map but no target named `default` no longer
+  falls back to the built-in default vault folder and per-hostname remote
+  folder: a command without `--target` now stops with "Unknown target".
+  `add-target default ...` can now create that target. Single-folder configs
+  without a `targets` map are unchanged. Covered by
+  `test/default-target.test.js`.
+
 ### Fixed
 
 - `pull` and `get` work with Proton Drive CLI `0.9.0`, which renamed the
@@ -18,6 +45,9 @@ follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
   `keychain`, `unsafe_file`, `pass`), and why a Windows command run over SSH
   with key authentication reports an expired session (it cannot read
   Credential Manager; run it in the desktop session instead).
+- README: new "Keeping old versions" section, the "not a versioned backup"
+  wording now says "by default", and a neutral example replaces a personal
+  folder name in the shared-vault section.
 
 ## [1.5.0] - 2026-09-29
 

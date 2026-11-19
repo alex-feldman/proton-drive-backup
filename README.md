@@ -50,9 +50,12 @@ reference detail for anyone who wants to understand how it works.
 
 **This is a secure encrypted file drop, not a versioned backup.** There is no
 dedup, no snapshots, no point-in-time history, and no scheduled/unattended
-running. If you overwrite a good file with a bad one and sync again, the old
-copy is gone. Think "a safe place to put a copy of something important," not
-"a time machine."
+running. By default, if you overwrite a good file with a bad one and sync
+again, Proton moves the old copy to its Trash, where it is not kept as a
+version and this tool makes no promise about it (a target can opt in to keeping
+old versions, see [Keeping old versions](#keeping-old-versions-optional)).
+Think "a safe place to put a copy of something important," not "a time
+machine."
 
 If you need real backup semantics — versioning, deduplication, incremental
 snapshots, fully unattended/scheduled runs — use a tool built for that (e.g.
@@ -118,6 +121,10 @@ node backup.js setup
 2. Check for the `proton-drive` binary and, if it's missing, download and
    install it automatically into this folder's `bin/` (Windows/macOS/Linux,
    x64/arm64 — no admin/sudo needed, nothing added to your system `PATH`).
+   It installs the CLI version this tool was last tested with (currently
+   `0.9.0`), not whatever Proton lists as newest; to try another, run
+   `node backup.js setup --cli-version x.y.z` (or `latest`, or set
+   `PROTON_DRIVE_CLI_VERSION`).
    If your platform isn't one of those (e.g. Linux musl/Alpine), or the
    download fails, it tells you exactly where to get the binary yourself and
    how to point this tool at it (`PROTON_DRIVE_BIN`).
@@ -173,10 +180,11 @@ copies, it can't erase anything.
 
 Both `sync` and `pull` transfer the *contents* of the vault/remote folder
 item by item, never the folder itself, and pass `-d merge` plus a file
-conflict strategy to the underlying CLI (`-f replace` on upload, `-f remove`
-on download, which is what CLI `0.9.0` calls the same thing) so folders merge
-instead of colliding and files resolve in favor of whichever side is actively
-running the command. (An earlier version
+conflict strategy to the underlying CLI (`-f replace` on upload, or
+`-f create-new-revision` for a target that keeps old versions; `-f remove` on
+download, which is what CLI `0.9.0` calls the same thing as upload's
+`replace`) so folders merge instead of colliding and files resolve in favor of
+whichever side is actively running the command. (An earlier version
 transferred the whole folder in one call, which nested one more level of
 "vault name" or "remote folder name" every time you alternated `pull` and
 `sync` — compounding indefinitely with repeated use. Fixed 2026-07-28,
@@ -186,17 +194,18 @@ What this does **not** give you: live sync (changes only move when you run
 `sync`/`pull`), or deletion propagation (deleting a file on one machine and
 syncing does not remove it from the shared folder or from any other
 machine's vault). If two machines both create a file with the same name
-before syncing, whichever machine runs `sync` last wins (file conflicts
-always replace) — there's no merge-both-versions option for files, only
-for folders.
+before syncing, whichever machine runs `sync` last wins (a changed file
+replaces the remote copy, or becomes a new version of it if the target keeps
+versions). There's no merge-both-versions option for files, only for
+folders.
 
 **Converting an existing target from per-machine to shared later needs no
 code change**, whether it's the original `default` target or one you added
 afterward with `add-target`. A target's remote folder is just a config
 value (`config.json`, `targets.<name>.remoteFolder`). Point every machine's
 same-named target at the identical literal path instead of each having its
-own (e.g. `/my-files/naro-data-shared` instead of
-`/my-files/backups/<hostname>/naro-data`), and they converge from then on.
+own (e.g. `/my-files/photos-shared` instead of
+`/my-files/backups/<hostname>/photos`), and they converge from then on.
 The one-time catch: whatever already exists under each machine's old
 per-machine path does not move itself. Run `pull` then `sync` (or `both`)
 against the new shared path once, on each machine, to reconcile the
@@ -226,8 +235,12 @@ node backup.js pull --target <name>
 ```
 
 Each target is fully independent: `sync --target a` never touches target
-`b`'s local or remote folder. The first (originally `setup`-created) target
-is always named `default` and needs no `--target` flag.
+`b`'s local or remote folder. The target named `default` (the one `setup`
+creates) needs no `--target` flag. `default` is an ordinary target name: if
+your config has targets but none is called `default`, a command without
+`--target` stops with "Unknown target" instead of quietly using the built-in
+folder, and `node backup.js add-target default <local-path> <remote-folder>`
+creates it.
 
 Choose a separate remote folder for every target, such as
 `/my-files/backups/<hostname>/photos` beside the default `vault` folder.
@@ -383,12 +396,36 @@ friend: `git clone` it, run `node backup.js setup`, and they have their own
 independent encrypted file drop on their own Proton account. It does not
 touch, share, or depend on anyone else's data, bucket, or account.
 
+## Keeping old versions (optional)
+
+By default `sync` replaces a changed file: Proton moves the old remote copy to
+its Trash. A target can instead keep each old copy as a version of the same
+file:
+
+```bash
+node backup.js set-target <name> --keep-versions on     # "off" turns it back off
+node backup.js targets                                  # shows [keeps old versions]
+```
+
+It is a per-target setting in `config.json` (`keepVersions: true`), off unless
+you turn it on, and it affects later syncs only. Things to know:
+
+- Versions may count against your Proton storage. This tool has not measured
+  by how much, and `usage` still counts current files only.
+- There is no restore command here. To get an older version back, open the
+  file's version history in Proton Drive on the web. `pull` and `get` always
+  download the current version.
+- It changes nothing else: `sync` still never deletes remotely.
+- Leave it off for anything where old copies should not linger, for example
+  files you rotate because a previous value is no longer safe to keep.
+
 ## Known limitations
 
 - No unattended/scheduled backups (the auth model doesn't allow it today).
-- No versioning — syncing a file with the same name overwrites the remote
-  copy silently on Proton's side (Drive itself may keep some native history;
-  this tool makes no promise about that and doesn't manage it).
+- No versioning by default: syncing a changed file replaces the remote copy
+  and Proton moves the old one to its Trash, which this tool does not manage
+  and makes no promise about. A target can opt in to keeping versions (see
+  above); there is still no restore command.
 - `sync` re-uploads the whole vault folder each time via the CLI's own
   recursive upload, rather than diffing file-by-file — simple and robust, at
   the cost of some redundant transfer on a large, mostly-unchanged vault.
@@ -407,7 +444,10 @@ touch, share, or depend on anyone else's data, bucket, or account.
   (2026-08-01: fresh-clone auto-install, `check`, `sync`, `list`, `get`,
   and remote folder auto-create all pass). CLI `0.9.0` (2026-11) renamed the
   download file-conflict value `replace` to `remove`, which broke `pull` and
-  `get` until this tool followed it; upload still takes `replace`. If a
+  `get` until this tool followed it; upload still takes `replace`. Because a
+  minor CLI release can change a flag like that, `setup` installs the pinned,
+  tested version (`0.9.0`) rather than the newest, and trying another is an
+  explicit `--cli-version`. If a
   command starts failing with
   something that looks like a usage error rather than an auth error, check
   `proton-drive --help` — the syntax may have moved on since this was

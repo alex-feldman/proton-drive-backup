@@ -4,7 +4,8 @@
 /**
  * proton-drive-backup — a thin wrapper around the official Proton Drive CLI
  * (`proton-drive`) for keeping a local "vault" folder synced to a dedicated,
- * encrypted Proton Drive folder. Not a versioned backup tool — see README.md.
+ * encrypted Proton Drive folder. Not a versioned backup tool by default (a target can
+ * opt in to keeping old versions); see README.md.
  *
  * The `proton-drive` CLI shipped June 2026 and its exact subcommand syntax
  * may drift. If a command below stops matching `proton-drive --help`,
@@ -20,8 +21,18 @@ const readline = require('readline');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const LOCAL_BIN_DIR = path.join(__dirname, 'bin');
-// Last known-good version, used only if live version discovery fails.
-const FALLBACK_CLI_VERSION = '0.6.0';
+// The Proton Drive CLI version `setup` installs by default: the newest one this tool
+// was tested against. Proton's CLI is pre-1.0 and has renamed flag values between minor
+// releases (0.9.0 broke `pull`), so the tool no longer installs "whatever is newest" on
+// its own. Opt in to another version with `--cli-version x.y.z` or `--cli-version latest`
+// (or PROTON_DRIVE_CLI_VERSION). Raise this constant after testing a newer CLI.
+const PINNED_CLI_VERSION = '0.9.0';
+const CLI_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+
+// Upload file-conflict strategies. `replace` trashes the old remote file; keepVersions
+// targets use `create-new-revision` instead, which keeps it as a version of the same file.
+const UPLOAD_REPLACE_STRATEGY = 'replace';
+const UPLOAD_KEEP_VERSIONS_STRATEGY = 'create-new-revision';
 
 function loadConfig() {
   if (fs.existsSync(CONFIG_PATH)) {
@@ -85,9 +96,19 @@ function listPath(remotePath) {
 function resolveTarget(config, name) {
   if (config.targets && config.targets[name]) return config.targets[name];
   if (name === 'default' && !config.targets) {
-    return { vaultPath: config.vaultPath, remoteFolder: config.remoteFolder };
+    return { vaultPath: config.vaultPath, remoteFolder: config.remoteFolder, keepVersions: config.keepVersions };
   }
   return null;
+}
+
+/**
+ * The implicit built-in `default` paths (`~/Documents/proton-vault`, a per-hostname remote
+ * folder) apply only to a config that has no `targets` map yet (fresh or pre-targets).
+ * Once a config has a `targets` map, `default` is a target like any other: if it is not in
+ * the map, asking for it is an error, never a silent fallback to those built-in paths.
+ */
+function allowsImplicitDefault(config, target) {
+  return Boolean(target) || !config.targets;
 }
 
 function targetNames(config) {
@@ -113,7 +134,7 @@ function vaultPath(targetName = 'default') {
   if (targetName === 'default' && process.env.PROTON_VAULT_PATH) return process.env.PROTON_VAULT_PATH;
   const target = resolveTarget(config, targetName);
   if (target && target.vaultPath) return target.vaultPath;
-  if (targetName === 'default') return defaultVaultPath();
+  if (targetName === 'default' && allowsImplicitDefault(config, target)) return defaultVaultPath();
   console.error(`Unknown target "${targetName}". Configured targets: ${targetNames(config).join(', ')}`);
   console.error('Add it first: node backup.js add-target <name> <local-path> <remote-folder>');
   process.exit(1);
@@ -128,7 +149,7 @@ function remoteFolder(targetName = 'default') {
     const target = resolveTarget(config, targetName);
     if (target && target.remoteFolder) {
       raw = target.remoteFolder;
-    } else if (targetName === 'default') {
+    } else if (targetName === 'default' && allowsImplicitDefault(config, target)) {
       raw = defaultRemoteFolder();
     } else {
       console.error(`Unknown target "${targetName}". Configured targets: ${targetNames(config).join(', ')}`);
@@ -151,11 +172,13 @@ function cmdAddTarget(name, localPath, remoteFolderArg) {
     console.error('Usage: node backup.js add-target <name> <local-path> <remote-folder>');
     process.exit(1);
   }
-  if (name === 'default') {
+  const config = loadConfig();
+  // A config without a targets map has an implicit `default`. Once there is a targets map,
+  // `default` is an ordinary name: it can be added if absent, and is refused as a duplicate if present.
+  if (name === 'default' && !config.targets) {
     console.error('"default" already exists implicitly. Choose a different target name.');
     process.exit(1);
   }
-  const config = loadConfig();
   if (!config.targets) {
     config.targets = {
       default: { vaultPath: config.vaultPath || defaultVaultPath(), remoteFolder: config.remoteFolder || defaultRemoteFolder() },
@@ -180,12 +203,60 @@ function cmdAddTarget(name, localPath, remoteFolderArg) {
   console.log(`Use it with --target ${name} on any command, e.g. "node backup.js sync --target ${name}".`);
 }
 
+/**
+ * `set-target <name> --keep-versions on|off`: whether `sync` keeps the old remote copy of a
+ * changed file as a version (`on`) or replaces it, trashing the old one (`off`, the default).
+ * Config only, no login. Stored as `keepVersions: true` on the target, or removed for `off`.
+ */
+function cmdSetTarget(args) {
+  const name = args[0];
+  const flag = args.indexOf('--keep-versions');
+  const value = flag === -1 ? undefined : args[flag + 1];
+  if (!name || name.startsWith('--') || (value !== 'on' && value !== 'off')) {
+    console.error('Usage: node backup.js set-target <name> --keep-versions on|off');
+    process.exit(1);
+  }
+  const config = loadConfig();
+  const keep = value === 'on';
+  if (config.targets && config.targets[name]) {
+    if (keep) config.targets[name].keepVersions = true;
+    else delete config.targets[name].keepVersions;
+  } else if (!config.targets && name === 'default' && (config.vaultPath || config.remoteFolder)) {
+    // Flat (pre-targets) config: the implicit default's settings live at the top level.
+    if (keep) config.keepVersions = true;
+    else delete config.keepVersions;
+  } else {
+    console.error(`Unknown target "${name}". Configured targets: ${targetNames(config).join(', ')}`);
+    process.exit(1);
+  }
+  saveConfig(config);
+  if (keep) {
+    console.log(`Target "${name}" now keeps old versions: sync uploads a changed file as a new version of the same file.`);
+    console.log('Versions may count against your Proton storage. This tool has no restore command; open a file\'s version history in Proton Drive on the web.');
+  } else {
+    console.log(`Target "${name}" no longer keeps old versions: sync replaces a changed remote file (Proton moves the old copy to Trash).`);
+  }
+}
+
 function cmdTargets() {
   const config = loadConfig();
   for (const name of targetNames(config)) {
     const t = resolveTarget(config, name);
-    console.log(`${name}: ${t.vaultPath || defaultVaultPath()} <-> ${normalizeRemoteFolder(t.remoteFolder || defaultRemoteFolder())}`);
+    const note = t.keepVersions === true ? ' [keeps old versions]' : '';
+    console.log(`${name}: ${t.vaultPath || defaultVaultPath()} <-> ${normalizeRemoteFolder(t.remoteFolder || defaultRemoteFolder())}${note}`);
   }
+}
+
+/** Pulls `--cli-version <x.y.z|latest>` out of argv wherever it appears. */
+function extractCliVersion(args) {
+  const idx = args.indexOf('--cli-version');
+  if (idx === -1) return { cliVersion: '', rest: args };
+  const cliVersion = args[idx + 1];
+  if (!cliVersion) {
+    console.error('--cli-version requires a value: x.y.z or latest');
+    process.exit(1);
+  }
+  return { cliVersion, rest: [...args.slice(0, idx), ...args.slice(idx + 2)] };
 }
 
 /** Pulls a trailing `--target <name>` out of argv wherever it appears. */
@@ -305,17 +376,33 @@ function httpGetFollow(url, redirectsLeft = 5) {
   });
 }
 
+/** Newest version Proton's download page lists. Used only for an explicit `--cli-version latest`. */
 async function discoverCliVersion() {
   try {
     const res = await httpGetFollow('https://proton.me/download/drive/cli/index.html');
     let body = '';
     for await (const chunk of res) body += chunk;
     const match = body.match(/\/download\/drive\/cli\/(\d+\.\d+\.\d+)\//);
-    return match ? match[1] : FALLBACK_CLI_VERSION;
+    return match ? match[1] : PINNED_CLI_VERSION;
   } catch (err) {
-    return FALLBACK_CLI_VERSION;
+    return PINNED_CLI_VERSION;
   }
 }
+
+/**
+ * Which CLI version to install. No request means the pinned, tested version and never
+ * touches the network. `latest` asks Proton's download page. `x.y.z` installs that exact
+ * version (old versions stay downloadable; only the newest is linked on the index page).
+ */
+async function resolveCliVersion(request, discover = discoverCliVersion) {
+  if (!request) return PINNED_CLI_VERSION;
+  if (request === 'latest') return discover();
+  if (CLI_VERSION_PATTERN.test(request)) return request;
+  throw new Error(`Invalid CLI version "${request}": use x.y.z (for example ${PINNED_CLI_VERSION}) or "latest".`);
+}
+
+/** Set by main() from `--cli-version`, else PROTON_DRIVE_CLI_VERSION; empty means the pinned version. */
+let requestedCliVersion = '';
 
 async function downloadFile(url, destPath) {
   const res = await httpGetFollow(url);
@@ -337,7 +424,10 @@ async function tryAutoInstall() {
   }
 
   try {
-    const version = await discoverCliVersion();
+    const version = await resolveCliVersion(requestedCliVersion);
+    if (version !== PINNED_CLI_VERSION) {
+      console.log(`Note: this tool was tested with Proton Drive CLI ${PINNED_CLI_VERSION}; installing ${version} as you asked. If a command stops working, reinstall the tested one: node backup.js setup --cli-version ${PINNED_CLI_VERSION}`);
+    }
     const url = `https://proton.me/download/drive/cli/${version}/${plat.os}-${plat.arch}/proton-drive${plat.ext}`;
     fs.mkdirSync(LOCAL_BIN_DIR, { recursive: true });
     const dest = path.join(LOCAL_BIN_DIR, `proton-drive${plat.ext}`);
@@ -653,8 +743,10 @@ async function cmdSync(targetName = 'default') {
   ensureRemoteFolder(folder);
 
   const localPaths = entries.map((name) => path.join(vault, name));
-  console.log(`Uploading ${entries.length} item(s) from ${vault} -> ${folder} ...`);
-  const result = runProton(['filesystem', 'upload', ...localPaths, folder, '-d', 'merge', '-f', 'replace'], { inherit: true });
+  const keepVersions = (resolveTarget(loadConfig(), targetName) || {}).keepVersions === true;
+  const uploadStrategy = keepVersions ? UPLOAD_KEEP_VERSIONS_STRATEGY : UPLOAD_REPLACE_STRATEGY;
+  console.log(`Uploading ${entries.length} item(s) from ${vault} -> ${folder}${keepVersions ? ' (keeping old versions of changed files)' : ''} ...`);
+  const result = runProton(['filesystem', 'upload', ...localPaths, folder, '-d', 'merge', '-f', uploadStrategy], { inherit: true });
   if (!result.ok) {
     if (result.authFailure) {
       printAuthHelp();
@@ -866,9 +958,14 @@ Usage:
   node backup.js add-target <name> <local-path> <remote-folder>
                                      Register a second (or third, ...) independent
                                      local<->remote pair under the same login
+  node backup.js set-target <name> --keep-versions on|off
+                                     Keep old versions of changed files on sync (off by default)
   node backup.js targets            List configured targets and their paths
+  node backup.js setup --cli-version x.y.z|latest
+                                     Install that Proton Drive CLI version instead of the
+                                     tested one (${PINNED_CLI_VERSION})
 
-Every command above except "setup" and "add-target"/"targets" accepts
+Every command above except "setup" and "add-target"/"set-target"/"targets" accepts
 "--target <name>" to operate on a target other than the default vault, e.g.
 "node backup.js sync --target assets". No new login is needed for a second
 target — one Proton session covers the whole account; targets just decide
@@ -880,7 +977,9 @@ can never wipe out either side. "both" is a convenience that just runs pull
 then sync back-to-back for you when you want both sides fully caught up in
 one command — it does not change what sync or pull do on their own.
 
-Not a versioned backup tool. See README.md for what this is and is not.`);
+Not a versioned backup tool by default: a changed file replaces its remote copy
+unless the target opted in with set-target --keep-versions. See README.md for
+what this is and is not.`);
 }
 
 async function main() {
@@ -890,11 +989,17 @@ async function main() {
     cmdAddTarget(rawRest[0], rawRest[1], rawRest[2]);
     return;
   }
+  if (cmd === 'set-target') {
+    cmdSetTarget(rawRest);
+    return;
+  }
   if (cmd === 'targets') {
     cmdTargets();
     return;
   }
-  const { target, rest } = extractTarget(rawRest);
+  const withoutCliVersion = extractCliVersion(rawRest);
+  requestedCliVersion = withoutCliVersion.cliVersion || process.env.PROTON_DRIVE_CLI_VERSION || '';
+  const { target, rest } = extractTarget(withoutCliVersion.rest);
   switch (cmd) {
     case 'setup':
       await cmdSetup();
@@ -939,4 +1044,12 @@ if (require.main === module) {
   });
 }
 
-module.exports = { defaultRemoteFolder, normalizeRemoteFolder, overlappingTarget, resolveTarget, DOWNLOAD_FILE_STRATEGY };
+module.exports = {
+  defaultRemoteFolder,
+  normalizeRemoteFolder,
+  overlappingTarget,
+  resolveTarget,
+  resolveCliVersion,
+  DOWNLOAD_FILE_STRATEGY,
+  PINNED_CLI_VERSION,
+};
