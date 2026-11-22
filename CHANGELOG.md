@@ -14,6 +14,9 @@ follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
   bare name only (no slashes), so nothing outside the backup folder is
   reachable; refused when the item is missing remotely or still in the local
   vault; a dry run without `--yes`. Covered by `test/trash.test.js`.
+- The README's "Give this to a friend" skill prompt now tells the agent to
+  remove things from the backup only through `trash`, dry run first, and only
+  after the user says yes.
 
 ## [1.6.0] - 2026-11-19
 

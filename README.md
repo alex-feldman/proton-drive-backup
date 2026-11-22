@@ -33,7 +33,11 @@ instead of remembering two commands:
 > unattended, so a scheduled job could fail silently for weeks without me
 > noticing. Also: whenever I say "sync to vault" (or close wording, like
 > "back up the vault" or "push the vault"), treat that as me asking you to
-> run this skill — don't make me spell out the full request every time.
+> run this skill — don't make me spell out the full request every time. And
+> if I ask to remove something from the Proton Drive backup, use
+> `node backup.js trash <name>`: run it without `--yes` first, show me what
+> it would move to Trash, and only rerun with `--yes` after I say yes. Never
+> delete from Proton Drive any other way.
 
 Then prove it actually works end to end:
 
