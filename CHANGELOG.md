@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `trash <name> [--yes]` moves one top-level item of a target's remote folder
+  to Proton Drive's Trash (`filesystem trash`), the first command that removes
+  anything remotely. Trash only, never a permanent delete or empty-trash; a
+  bare name only (no slashes), so nothing outside the backup folder is
+  reachable; refused when the item is missing remotely or still in the local
+  vault; a dry run without `--yes`. Covered by `test/trash.test.js`.
+
 ## [1.6.0] - 2026-11-19
 
 ### Added

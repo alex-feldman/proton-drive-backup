@@ -79,8 +79,9 @@ Everything revolves around one local folder, the **vault** — by default
   command, or just drag-and-drop in Finder/Explorer/your file manager.
 - `sync` uploads the whole vault to your dedicated Proton Drive folder.
 - Sync never deletes anything remotely. Removing a file from the vault only
-  removes your local copy — the remote copy stays until you delete it
-  yourself (in the Proton Drive web app, or with the CLI directly).
+  removes your local copy — the remote copy stays until you remove it
+  yourself: `node backup.js trash <name>` (below), the Proton Drive web app,
+  or the CLI directly.
 
 This means the vault is the single place to look to know what's backed up,
 and you can use whatever local organization (subfolders, renaming) you like
@@ -271,7 +272,7 @@ folder," this isn't that tool.
 **Orphan detection: `check` and `sync` warn you about drift, automatically.**
 Since `sync` never deletes anything remotely (see "How it works" above), a
 file you delete locally silently persists forever on Proton Drive unless you
-remove it yourself. This tool won't fix that for you, but it will tell you:
+remove it yourself. `sync` won't fix that for you, but it will tell you:
 
 - `check` compares the remote folder's top-level names against the local
   folder and prints a note if anything exists remotely with no local
@@ -283,6 +284,26 @@ remove it yourself. This tool won't fix that for you, but it will tell you:
 
 Both are advisory only: they never change the exit code and never touch
 either side. Top-level only, like `.vaultignore` above, for the same reason.
+
+**Removing a leftover: `trash`.** `node backup.js trash <name>` moves one item
+of the remote folder to Proton Drive's Trash, where you can restore it. It is
+the only command that removes anything, and it is narrow on purpose:
+
+- It acts only on your own logged-in account, and only on a name directly
+  inside the target's remote folder (no slashes), so nothing outside the
+  backup folder is reachable through it.
+- It refuses a name that is not in the remote folder, and a name your local
+  vault still has, because the next `sync` would upload it again. Remove the
+  local copy first. With several machines, remove it from every machine's
+  vault first, or that machine's next sync brings it back.
+- Without `--yes` it only prints what it would do.
+- It only ever trashes. It never deletes permanently or empties the Trash;
+  do that in Proton Drive yourself if you want it.
+
+```
+node backup.js trash old-notes.txt            # shows the plan, changes nothing
+node backup.js trash old-notes.txt --yes      # moves it to Trash
+```
 
 **A caveat if you're on Windows and running these commands from Git Bash (or
 any MSYS2 shell):** the shell rewrites a leading `/` in a command argument

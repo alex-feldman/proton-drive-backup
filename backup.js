@@ -935,6 +935,65 @@ async function cmdGet(name, destDir, targetName = 'default') {
   console.log(`\nDownloaded to ${dest}`);
 }
 
+/**
+ * Move one top-level item of a target's remote folder to Proton Drive's Trash.
+ *
+ * Deliberately narrow, because `sync` never deletes and this is the only way the tool removes
+ * anything: it acts only on the logged-in account, only on a name directly inside the target's
+ * remote folder (no slashes, so nothing outside that folder is reachable), only when the item
+ * exists there, and only to Trash (restorable from Proton Drive), never a permanent delete or an
+ * empty-trash. Without --yes it only prints what it would do. It refuses while the vault still
+ * has a local copy, because the next sync would upload it again.
+ */
+function trashNameProblem(name) {
+  if (!name || !name.trim()) return 'a name is required';
+  if (name !== name.trim()) return 'the name has leading or trailing spaces';
+  if (name === '.' || name === '..') return 'not a file or folder name';
+  if (/[\\/]/.test(name)) return 'only a name directly inside the remote folder is allowed (no slashes)';
+  return null;
+}
+
+async function cmdTrash(name, opts = {}, targetName = 'default') {
+  const problem = trashNameProblem(name);
+  if (problem) {
+    console.error(`trash: ${problem}.`);
+    console.error('Usage: node backup.js trash <remote-name> [--yes] [--target <name>]');
+    process.exit(1);
+  }
+  await ensureBinary();
+  const folder = remoteFolder(targetName);
+  const names = remoteTopLevelNames(folder);
+  if (names === null) {
+    const probe = listPath(folder);
+    if (probe.authFailure) printAuthHelp();
+    else console.error(`Could not list "${folder}".`);
+    process.exit(1);
+  }
+  if (!names.includes(name)) {
+    console.error(`"${name}" is not in "${folder}". Check "node backup.js list" for the exact name.`);
+    process.exit(1);
+  }
+  const local = path.join(vaultPath(targetName), name);
+  if (fs.existsSync(local)) {
+    console.error(`"${name}" is still in your local vault (${local}); the next sync would upload it again.`);
+    console.error('Remove or move the local copy first, then run trash.');
+    process.exit(1);
+  }
+  const remotePath = `${folder}/${name}`;
+  if (!opts.yes) {
+    console.log(`Would move "${remotePath}" to Proton Drive's Trash (restorable there).`);
+    console.log('Nothing changed. Run again with --yes to do it.');
+    return;
+  }
+  const result = runProton(['filesystem', 'trash', remotePath]);
+  if (!result.ok) {
+    if (result.authFailure) printAuthHelp();
+    else console.error(`Could not trash "${remotePath}": ${(result.stderr || result.stdout).trim()}`);
+    process.exit(1);
+  }
+  console.log(`Moved "${remotePath}" to Proton Drive's Trash. Restore it from Trash in Proton Drive if needed.`);
+}
+
 function printHelp() {
   console.log(`proton-drive-backup — simple encrypted file drop on Proton Drive
 
@@ -955,6 +1014,10 @@ Usage:
   node backup.js list               List what is in your remote backup folder
   node backup.js usage              Total current remote files and show the largest
   node backup.js get <name> [dest]  Download a file back down
+  node backup.js trash <name> [--yes]
+                                     Move one item of the remote folder to Proton
+                                     Drive's Trash (restorable); shows the plan
+                                     without --yes. Never deletes permanently
   node backup.js add-target <name> <local-path> <remote-folder>
                                      Register a second (or third, ...) independent
                                      local<->remote pair under the same login
@@ -1031,6 +1094,9 @@ async function main() {
     case 'get':
       await cmdGet(rest[0], rest[1], target);
       break;
+    case 'trash':
+      await cmdTrash(rest.find((a) => a !== '--yes'), { yes: rest.includes('--yes') }, target);
+      break;
     default:
       printHelp();
       process.exit(cmd ? 1 : 0);
@@ -1050,6 +1116,7 @@ module.exports = {
   overlappingTarget,
   resolveTarget,
   resolveCliVersion,
+  trashNameProblem,
   DOWNLOAD_FILE_STRATEGY,
   PINNED_CLI_VERSION,
 };
