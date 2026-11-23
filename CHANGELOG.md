@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `config.json.bak-*` is now gitignored beside `config.json`: a hand-made backup of the live
+  config is the same local-only class, and an untracked one left inside the submodule blocked
+  the fleet's idle-clone heal (mortar, 2026-11-23, `BLOCKED_DIRTY` for two hourly runs until
+  the backup was moved aside).
+
 ## [1.7.1] - 2026-11-23
 
 ### Fixed
