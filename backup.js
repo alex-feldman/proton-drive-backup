@@ -93,10 +93,24 @@ function listPath(remotePath) {
  * just by reading it (only `add-target` migrates a config to the new shape,
  * same as normalizeRemoteFolder's own self-heal-on-write pattern above).
  */
+/**
+ * A leading `~` in a configured target path means the home folder. Node never expands it, so a
+ * config written as `~/Documents/proton-vault/keys` pointed at a folder that does not exist (found on
+ * a Windows machine, 2026-11-23). Applied wherever a target's local path is read.
+ */
+function expandHome(p) {
+  if (typeof p !== 'string') return p;
+  if (p === '~') return os.homedir();
+  return /^~[\\/]/.test(p) ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
 function resolveTarget(config, name) {
-  if (config.targets && config.targets[name]) return config.targets[name];
+  if (config.targets && config.targets[name]) {
+    const t = config.targets[name];
+    return { ...t, vaultPath: expandHome(t.vaultPath) };
+  }
   if (name === 'default' && !config.targets) {
-    return { vaultPath: config.vaultPath, remoteFolder: config.remoteFolder, keepVersions: config.keepVersions };
+    return { vaultPath: expandHome(config.vaultPath), remoteFolder: config.remoteFolder, keepVersions: config.keepVersions };
   }
   return null;
 }

@@ -59,3 +59,10 @@ test('add-target refuses overlap without changing config, then accepts a sibling
   assert.equal(JSON.parse(fs.readFileSync(configPath, 'utf8')).targets.photos.remoteFolder,
     '/my-files/backups/host/photos');
 });
+
+test('a target path that starts with ~ resolves to the home folder (2026-11-23)', () => {
+  const cfg = { targets: { keys: { vaultPath: '~/Documents/proton-vault/keys', remoteFolder: '/my-files/backups/shared/keys' } } };
+  assert.equal(resolveTarget(cfg, 'keys').vaultPath, path.join(os.homedir(), 'Documents/proton-vault/keys'));
+  assert.equal(resolveTarget({ vaultPath: '~', remoteFolder: '/x' }, 'default').vaultPath, os.homedir());
+  assert.equal(resolveTarget({ targets: { a: { vaultPath: '/abs/path', remoteFolder: '/x' } } }, 'a').vaultPath, '/abs/path');
+});

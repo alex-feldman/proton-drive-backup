@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A target whose local path starts with `~` (for example `~/Documents/proton-vault/keys`) now resolves
+  to the home folder. Node never expands `~`, so such a target pointed at a folder that does not exist,
+  and `targets`, `sync` and `pull` used the literal path.
+
 ## [1.7.0] - 2026-11-23
 
 ### Added
